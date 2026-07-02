@@ -91,6 +91,7 @@ public class MainActivity extends Activity {
     private EditText timeoutEdit;
     private EditText concurrencyEdit;
     private EditText candidatesEdit;
+    private EditText maxTcpMsEdit;
     private EditText repeatsEdit;
     private EditText downloadMbEdit;
     private EditText minSpeedEdit;
@@ -199,9 +200,12 @@ public class MainActivity extends Activity {
         candidatesEdit = smallInput(row1, "候选数", pref("candidates", "100"));
 
         LinearLayout row2 = row(paramCard);
+        maxTcpMsEdit = smallInput(row2, "最大 TCP ms", pref("maxTcpMs", "120"));
         repeatsEdit = smallInput(row2, "复测次数", pref("repeats", "2"));
         downloadMbEdit = smallInput(row2, "单 IP 下载 MiB", pref("downloadMb", "2"));
-        minSpeedEdit = smallInput(row2, "最低 Mbps", pref("minSpeed", "80"));
+
+        LinearLayout row3 = row(paramCard);
+        minSpeedEdit = smallInput(row3, "最低 Mbps", pref("minSpeed", "80"));
 
         LinearLayout actionCard = card(root, "操作");
         LinearLayout buttons = row(actionCard);
@@ -528,23 +532,18 @@ public class MainActivity extends Activity {
 
                 List<Result> tcpOk = runTcpScan(targets, config);
                 tcpOk.sort(Comparator.comparingDouble(r -> r.tcpMs));
+                int beforeDelayFilter = tcpOk.size();
+                tcpOk = filterByMaxTcp(tcpOk, config);
+                if (config.maxTcpMs > 0 && beforeDelayFilter != tcpOk.size()) {
+                    log("最大 TCP 延迟过滤：保留 " + tcpOk.size() + " / " + beforeDelayFilter + " 条");
+                }
                 if (tcpOk.size() > config.candidates) {
                     tcpOk = new ArrayList<>(tcpOk.subList(0, config.candidates));
                 }
                 log("TCP 可连接 " + tcpOk.size() + " 条，进入 WS / 真实测速");
 
                 List<Result> checked = runWsScan(tcpOk, config);
-                checked.sort((a, b) -> {
-                    int fast = Boolean.compare(b.fastOk, a.fastOk);
-                    if (fast != 0) return fast;
-                    int real = Boolean.compare(b.realOk, a.realOk);
-                    if (real != 0) return real;
-                    int ws = Boolean.compare(b.handshakeOk, a.handshakeOk);
-                    if (ws != 0) return ws;
-                    int speed = Double.compare(b.speedMbps, a.speedMbps);
-                    if (speed != 0) return speed;
-                    return Double.compare(a.tcpMs, b.tcpMs);
-                });
+                checked.sort(this::compareResults);
                 lastResults = checked;
                 ui.post(() -> showResults(checked, config));
             } catch (Exception e) {
@@ -612,6 +611,7 @@ public class MainActivity extends Activity {
         c.timeoutMs = Math.max(500, (int) (parseDouble(timeoutEdit, 8) * 1000));
         c.concurrency = clamp((int) parseDouble(concurrencyEdit, 32), 1, 256);
         c.candidates = clamp((int) parseDouble(candidatesEdit, 100), 1, 5000);
+        c.maxTcpMs = Math.max(0, parseDouble(maxTcpMsEdit, 120));
         c.repeats = clamp((int) parseDouble(repeatsEdit, 2), 1, 10);
         c.downloadBytes = Math.max(1, (int) (parseDouble(downloadMbEdit, 2) * 1024 * 1024));
         c.minSpeedMbps = Math.max(0, parseDouble(minSpeedEdit, 80));
@@ -672,6 +672,7 @@ public class MainActivity extends Activity {
                 .putString("timeout", timeoutEdit.getText().toString())
                 .putString("concurrency", concurrencyEdit.getText().toString())
                 .putString("candidates", candidatesEdit.getText().toString())
+                .putString("maxTcpMs", maxTcpMsEdit.getText().toString())
                 .putString("repeats", repeatsEdit.getText().toString())
                 .putString("downloadMb", downloadMbEdit.getText().toString())
                 .putString("minSpeed", minSpeedEdit.getText().toString())
@@ -722,6 +723,33 @@ public class MainActivity extends Activity {
             }
         }
         return out;
+    }
+
+    private List<Result> filterByMaxTcp(List<Result> input, Config config) {
+        if (config.maxTcpMs <= 0) return input;
+        List<Result> out = new ArrayList<>();
+        for (Result r : input) {
+            if (r.tcpMs <= config.maxTcpMs) out.add(r);
+        }
+        return out;
+    }
+
+    private int compareResults(Result a, Result b) {
+        int fast = Boolean.compare(b.fastOk, a.fastOk);
+        if (fast != 0) return fast;
+        int real = Boolean.compare(b.realOk, a.realOk);
+        if (real != 0) return real;
+        int ws = Boolean.compare(b.handshakeOk, a.handshakeOk);
+        if (ws != 0) return ws;
+        int realCount = Integer.compare(b.realSuccesses, a.realSuccesses);
+        if (realCount != 0) return realCount;
+        int wsCount = Integer.compare(b.wsSuccesses, a.wsSuccesses);
+        if (wsCount != 0) return wsCount;
+        int speed = Double.compare(b.speedMbps, a.speedMbps);
+        if (speed != 0) return speed;
+        int tcp = Double.compare(a.tcpMs, b.tcpMs);
+        if (tcp != 0) return tcp;
+        return Double.compare(a.tlsMs, b.tlsMs);
     }
 
     private List<ProxyResult> runProxyTcpScan(List<Target> proxies, Config config) throws InterruptedException {
@@ -1120,7 +1148,14 @@ public class MainActivity extends Activity {
             for (Result r : lastResults) if (r.realOk) selected.add(r);
         }
         if (selected.isEmpty()) {
+            for (Result r : lastResults) if (r.handshakeOk) selected.add(r);
+        }
+        if (selected.isEmpty()) {
             return "";
+        }
+        selected.sort(this::compareResults);
+        if (selected.size() > 10) {
+            selected = new ArrayList<>(selected.subList(0, 10));
         }
         StringBuilder text = new StringBuilder();
         Config config = readConfig();
@@ -1711,6 +1746,7 @@ public class MainActivity extends Activity {
         int repeats;
         int downloadBytes;
         double minSpeedMbps;
+        double maxTcpMs;
         boolean realCheck;
         Set<String> regions;
         int runId;
