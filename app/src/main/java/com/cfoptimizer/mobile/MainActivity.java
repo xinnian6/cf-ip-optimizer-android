@@ -78,6 +78,8 @@ public class MainActivity extends Activity {
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final SecureRandom random = new SecureRandom();
+    private final AtomicInteger runSeq = new AtomicInteger();
+    private volatile int activeRunId = 0;
 
     private SharedPreferences prefs;
     private EditText sourceEdit;
@@ -510,10 +512,12 @@ public class MainActivity extends Activity {
         lastResults = new ArrayList<>();
         progress.setProgress(0);
         status("正在准备");
+        int runId = beginProgressRun();
 
         new Thread(() -> {
             try {
                 Config config = readConfig();
+                config.runId = runId;
                 saveConfig();
                 List<Target> targets = loadTargets(sourceEdit.getText().toString(), config.regions, true);
                 log("解析目标 " + targets.size() + " 条");
@@ -562,10 +566,12 @@ public class MainActivity extends Activity {
         lastProxyResults = new ArrayList<>();
         progress.setProgress(0);
         status("正在测试 ProxyIP");
+        int runId = beginProgressRun();
 
         new Thread(() -> {
             try {
                 Config config = readConfig();
+                config.runId = runId;
                 saveConfig();
                 List<Target> proxies = loadTargets(proxySourceEdit.getText().toString(), config.regions, true);
                 if (proxies.isEmpty()) {
@@ -700,7 +706,7 @@ public class MainActivity extends Activity {
                     r.error = shortError(e);
                 }
                 int n = done.incrementAndGet();
-                if (n % 20 == 0 || n == targets.size()) progress("TCP 初筛", n, targets.size());
+                if (n % 20 == 0 || n == targets.size()) progress(config.runId, "TCP 初筛", n, targets.size());
                 return r;
             }));
         }
@@ -737,7 +743,7 @@ public class MainActivity extends Activity {
                     }
                 }
                 int n = done.incrementAndGet();
-                progress("ProxyIP", n, proxies.size());
+                progress(config.runId, "ProxyIP", n, proxies.size());
                 return r;
             }));
         }
@@ -764,11 +770,11 @@ public class MainActivity extends Activity {
                 for (int i = 0; i < config.repeats; i++) {
                     probeWs(r, config);
                 }
-                r.handshakeOk = r.wsSuccesses > 0;
-                r.realOk = config.realCheck ? r.realSuccesses > 0 : r.handshakeOk;
+                r.handshakeOk = r.wsSuccesses == config.repeats;
+                r.realOk = config.realCheck ? r.realSuccesses == config.repeats : r.handshakeOk;
                 r.fastOk = r.realOk && (!config.realCheck || r.speedMbps >= config.minSpeedMbps);
                 int n = done.incrementAndGet();
-                progress("WS / 真实测速", n, candidates.size());
+                progress(config.runId, "WS / 真实测速", n, candidates.size());
                 return r;
             }));
         }
@@ -829,7 +835,7 @@ public class MainActivity extends Activity {
                     r.bytesRead += speed.bytes;
                     if (speed.ok()) {
                         r.realSuccesses++;
-                        r.speedMbps = Math.max(r.speedMbps, speed.mbps);
+                        r.speedMbps = r.speedMbps <= 0 ? speed.mbps : Math.min(r.speedMbps, speed.mbps);
                         r.error = "";
                     } else {
                         r.error = speed.status > 0 ? "真实测速 HTTP " + speed.status : "真实测速无数据";
@@ -1112,9 +1118,6 @@ public class MainActivity extends Activity {
         for (Result r : lastResults) if (r.fastOk) selected.add(r);
         if (selected.isEmpty()) {
             for (Result r : lastResults) if (r.realOk) selected.add(r);
-        }
-        if (selected.isEmpty()) {
-            for (Result r : lastResults) if (r.handshakeOk) selected.add(r);
         }
         if (selected.isEmpty()) {
             return "";
@@ -1629,11 +1632,20 @@ public class MainActivity extends Activity {
         return (System.nanoTime() - start) / 1_000_000.0;
     }
 
-    private void progress(String stage, int done, int total) {
-        int percent = total <= 0 ? 0 : (int) (done * 100.0 / total);
+    private int beginProgressRun() {
+        int id = runSeq.incrementAndGet();
+        activeRunId = id;
+        return id;
+    }
+
+    private void progress(int runId, String stage, int done, int total) {
+        if (runId != activeRunId) return;
+        int safeDone = total <= 0 ? 0 : Math.min(Math.max(done, 0), total);
+        int percent = total <= 0 ? 0 : (int) (safeDone * 100.0 / total);
         ui.post(() -> {
+            if (runId != activeRunId) return;
             progress.setProgress(percent);
-            statusText.setText(stage + " " + done + "/" + total);
+            statusText.setText(stage + " " + safeDone + "/" + total);
         });
     }
 
@@ -1701,6 +1713,7 @@ public class MainActivity extends Activity {
         double minSpeedMbps;
         boolean realCheck;
         Set<String> regions;
+        int runId;
     }
 
     static class Target {
