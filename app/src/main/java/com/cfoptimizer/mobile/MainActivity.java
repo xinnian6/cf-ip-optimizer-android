@@ -1,6 +1,7 @@
 package com.cfoptimizer.mobile;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -15,6 +16,8 @@ import android.os.Looper;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.CompoundButton;
@@ -22,6 +25,7 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -93,9 +97,9 @@ public class MainActivity extends Activity {
     private EditText lineSuffixEdit;
     private EditText textspaceUrlEdit;
     private EditText textspaceTokenEdit;
-    private EditText textspaceNoteIdEdit;
     private EditText textspaceTitleEdit;
     private EditText textspaceContentEdit;
+    private Spinner textspaceNoteSpinner;
     private CheckBox realCheck;
     private CheckBox allRegionCheck;
     private CheckBox hkCheck;
@@ -108,10 +112,11 @@ public class MainActivity extends Activity {
     private Button copyButton;
     private Button proxyButton;
     private Button copyProxyTopButton;
-    private Button loadNoteButton;
-    private Button fillResultButton;
+    private Button refreshNotesButton;
+    private Button saveResultButton;
     private Button saveNoteButton;
     private Button shareNoteButton;
+    private Button deleteNoteButton;
     private ProgressBar progress;
     private TextView statusText;
     private TextView resultText;
@@ -121,8 +126,10 @@ public class MainActivity extends Activity {
 
     private volatile boolean running = false;
     private volatile boolean textspaceRunning = false;
+    private boolean loadingTextspaceSpinner = false;
     private List<Result> lastResults = new ArrayList<>();
     private List<ProxyResult> lastProxyResults = new ArrayList<>();
+    private List<NoteSummary> textspaceNotes = new ArrayList<>();
     private NoteDetail currentNote;
 
     @Override
@@ -246,37 +253,79 @@ public class MainActivity extends Activity {
         textspaceUrlEdit = input(publishCard, "TextSpace Worker 地址", pref("textspaceUrl", ""), 1, false);
         textspaceTokenEdit = input(publishCard, "管理员密钥", pref("textspaceToken", ""), 1, false);
         textspaceTokenEdit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        textspaceNoteIdEdit = input(publishCard, "文本 ID（留空时读取列表第一条或新建）", pref("textspaceNoteId", ""), 1, false);
+        View.OnFocusChangeListener autoRefreshTextspace = (view, hasFocus) -> {
+            if (!hasFocus
+                    && !textspaceUrlEdit.getText().toString().trim().isEmpty()
+                    && !textspaceTokenEdit.getText().toString().trim().isEmpty()) {
+                loadTextspaceNotes(false);
+            }
+        };
+        textspaceUrlEdit.setOnFocusChangeListener(autoRefreshTextspace);
+        textspaceTokenEdit.setOnFocusChangeListener(autoRefreshTextspace);
+
+        TextView noteLabel = label("文本列表（选择后自动读取）");
+        publishCard.addView(noteLabel);
+        LinearLayout noteRow = row(publishCard);
+        textspaceNoteSpinner = new Spinner(this);
+        textspaceNoteSpinner.setBackground(fieldBg());
+        noteRow.addView(textspaceNoteSpinner, new LinearLayout.LayoutParams(0, dp(44), 1));
+        refreshNotesButton = button("刷新", BLUE);
+        refreshNotesButton.setOnClickListener(v -> loadTextspaceNotes(true));
+        LinearLayout.LayoutParams refreshLp = new LinearLayout.LayoutParams(dp(82), dp(44));
+        refreshLp.leftMargin = dp(8);
+        noteRow.addView(refreshNotesButton, refreshLp);
+        textspaceNoteSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                if (loadingTextspaceSpinner || position < 0 || position >= textspaceNotes.size()) return;
+                NoteSummary note = textspaceNotes.get(position);
+                if (currentNote != null && note.id.equals(currentNote.id)) return;
+                loadTextspaceNoteById(note.id);
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
+
         textspaceTitleEdit = input(publishCard, "文本标题", pref("textspaceTitle", "CF 手机优选结果"), 1, false);
         textspaceContentEdit = input(publishCard, "文本内容（可编辑，保存后分享 URL 就会更新）", pref("textspaceContent", ""), 6, false);
 
         LinearLayout pubRow1 = row(publishCard);
-        loadNoteButton = button("获取文本", BLUE);
-        loadNoteButton.setOnClickListener(v -> loadTextspaceNote());
-        pubRow1.addView(loadNoteButton, new LinearLayout.LayoutParams(0, dp(44), 1));
-
-        fillResultButton = button("填入结果", ORANGE);
-        fillResultButton.setOnClickListener(v -> fillTextspaceWithResults());
-        LinearLayout.LayoutParams fillLp = new LinearLayout.LayoutParams(0, dp(44), 1);
-        fillLp.leftMargin = dp(8);
-        pubRow1.addView(fillResultButton, fillLp);
-
-        LinearLayout pubRow2 = row(publishCard);
         saveNoteButton = button("保存文本", GREEN);
         saveNoteButton.setOnClickListener(v -> saveTextspaceNote(false));
-        pubRow2.addView(saveNoteButton, new LinearLayout.LayoutParams(0, dp(44), 1));
+        pubRow1.addView(saveNoteButton, new LinearLayout.LayoutParams(0, dp(44), 1));
 
         shareNoteButton = button("保存并分享", BLUE);
         shareNoteButton.setOnClickListener(v -> saveTextspaceNote(true));
         LinearLayout.LayoutParams shareLp = new LinearLayout.LayoutParams(0, dp(44), 1);
         shareLp.leftMargin = dp(8);
-        pubRow2.addView(shareNoteButton, shareLp);
+        pubRow1.addView(shareNoteButton, shareLp);
+
+        LinearLayout pubRow2 = row(publishCard);
+        saveResultButton = button("保存测速结果", ORANGE);
+        saveResultButton.setOnClickListener(v -> saveScanResultsToTextspace());
+        pubRow2.addView(saveResultButton, new LinearLayout.LayoutParams(0, dp(44), 1));
+
+        deleteNoteButton = button("删除文本", Color.rgb(220, 38, 38));
+        deleteNoteButton.setOnClickListener(v -> confirmDeleteTextspaceNote());
+        LinearLayout.LayoutParams deleteLp = new LinearLayout.LayoutParams(0, dp(44), 1);
+        deleteLp.leftMargin = dp(8);
+        pubRow2.addView(deleteNoteButton, deleteLp);
 
         LinearLayout logCard = card(root, "运行日志");
         logText = monoText();
         logCard.addView(logText);
 
         setContentView(scroll);
+        ui.postDelayed(() -> {
+            if (!textspaceUrlEdit.getText().toString().trim().isEmpty()
+                    && !textspaceTokenEdit.getText().toString().trim().isEmpty()) {
+                loadTextspaceNotes(false);
+            } else {
+                updateTextspaceSpinner();
+            }
+        }, 300);
     }
 
     private LinearLayout card(LinearLayout root, String titleText) {
@@ -344,7 +393,12 @@ public class MainActivity extends Activity {
     private LinearLayout row(LinearLayout root) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        root.addView(row);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        lp.topMargin = dp(6);
+        root.addView(row, lp);
         return row;
     }
 
@@ -607,7 +661,6 @@ public class MainActivity extends Activity {
                 .putString("lineSuffix", lineSuffixEdit.getText().toString())
                 .putString("textspaceUrl", textspaceUrlEdit.getText().toString())
                 .putString("textspaceToken", textspaceTokenEdit.getText().toString())
-                .putString("textspaceNoteId", textspaceNoteIdEdit.getText().toString())
                 .putString("textspaceTitle", textspaceTitleEdit.getText().toString())
                 .putString("textspaceContent", textspaceContentEdit.getText().toString())
                 .putString("timeout", timeoutEdit.getText().toString())
@@ -1105,69 +1158,97 @@ public class MainActivity extends Activity {
         Toast.makeText(this, toast, Toast.LENGTH_SHORT).show();
     }
 
-    private void fillTextspaceWithResults() {
+    private void saveScanResultsToTextspace() {
         String text = buildCopyResults();
         if (text.isEmpty()) {
-            Toast.makeText(this, "没有可填入的测速结果", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "没有可保存的测速结果", Toast.LENGTH_SHORT).show();
             return;
         }
         textspaceContentEdit.setText(text);
-        saveConfig();
-        Toast.makeText(this, "已填入测速结果", Toast.LENGTH_SHORT).show();
+        saveTextspaceNote(false);
     }
 
-    private void loadTextspaceNote() {
+    private void loadTextspaceNotes(boolean showToast) {
         if (textspaceRunning) return;
         textspaceRunning = true;
         setTextspaceButtons(false);
-        status("正在获取 TextSpace 文本");
+        status("正在获取 TextSpace 文本列表");
+        String preferredId = currentNote == null ? "" : currentNote.id;
+        String preferredTitle = textspaceTitleEdit.getText().toString().trim();
 
         new Thread(() -> {
             try {
                 saveConfig();
-                String noteId = textspaceNoteIdEdit.getText().toString().trim();
-                NoteDetail note;
-                if (!noteId.isEmpty()) {
-                    note = parseNote(new JSONObject(textspaceRequest("GET", "/api/notes/" + urlPart(noteId), null)));
-                } else {
-                    JSONArray notes;
-                    try {
-                        notes = new JSONArray(textspaceRequest("GET", "/api/notes?full=1", null));
-                    } catch (Exception fullError) {
-                        notes = new JSONArray(textspaceRequest("GET", "/api/notes", null));
+                JSONArray notes;
+                try {
+                    notes = new JSONArray(textspaceRequest("GET", "/api/notes?full=1", null));
+                } catch (Exception fullError) {
+                    notes = new JSONArray(textspaceRequest("GET", "/api/notes", null));
+                }
+
+                List<NoteSummary> loaded = new ArrayList<>();
+                List<NoteDetail> detailCache = new ArrayList<>();
+                for (int i = 0; i < notes.length(); i++) {
+                    JSONObject item = notes.getJSONObject(i);
+                    loaded.add(parseNoteSummary(item));
+                    if (item.has("content")) detailCache.add(parseNote(item));
+                }
+
+                NoteDetail selected = findDetail(detailCache, preferredId);
+                NoteSummary selectedSummary = null;
+                for (NoteSummary item : loaded) {
+                    if (!preferredId.isEmpty() && preferredId.equals(item.id)) {
+                        selectedSummary = item;
+                        break;
                     }
-                    if (notes.length() == 0) {
-                        toast("TextSpace 里还没有文本");
+                    if (selectedSummary == null && !preferredTitle.isEmpty() && preferredTitle.equals(item.title)) {
+                        selectedSummary = item;
+                    }
+                }
+                if (selectedSummary == null && !loaded.isEmpty()) selectedSummary = loaded.get(0);
+                if (selected == null && selectedSummary != null) selected = findDetail(detailCache, selectedSummary.id);
+                if (selected == null && selectedSummary != null && !selectedSummary.id.isEmpty()) {
+                    selected = parseNote(new JSONObject(textspaceRequest("GET", "/api/notes/" + urlPart(selectedSummary.id), null)));
+                }
+                NoteDetail selectedNote = selected;
+
+                ui.post(() -> {
+                    textspaceNotes = loaded;
+                    updateTextspaceSpinner();
+                    if (loaded.isEmpty()) {
+                        currentNote = null;
+                        status("TextSpace 里还没有文本，保存时会新建");
+                        if (showToast) Toast.makeText(this, "还没有文本，保存时会新建", Toast.LENGTH_SHORT).show();
                         return;
                     }
-                    String wantedTitle = textspaceTitleEdit.getText().toString().trim();
-                    JSONObject picked = notes.getJSONObject(0);
-                    if (!wantedTitle.isEmpty()) {
-                        for (int i = 0; i < notes.length(); i++) {
-                            JSONObject item = notes.getJSONObject(i);
-                            if (wantedTitle.equals(item.optString("title"))) {
-                                picked = item;
-                                break;
-                            }
-                        }
-                    }
-                    if (!picked.has("content")) {
-                        String pickedId = picked.optString("id", "");
-                        if (pickedId.isEmpty()) throw new IOException("文本列表缺少 ID");
-                        picked = new JSONObject(textspaceRequest("GET", "/api/notes/" + urlPart(pickedId), null));
-                    }
-                    note = parseNote(picked);
-                }
-                currentNote = note;
-                ui.post(() -> {
-                    textspaceNoteIdEdit.setText(note.id);
-                    textspaceTitleEdit.setText(note.title);
-                    textspaceContentEdit.setText(note.content);
-                    status("已获取文本：" + note.title);
+
+                    if (selectedNote != null) applyNote(selectedNote);
+                    status("已获取文本列表：" + loaded.size() + " 条");
                 });
             } catch (Exception e) {
-                log("TextSpace 获取失败: " + e.getMessage());
-                toast("获取失败: " + e.getMessage());
+                log("TextSpace 列表获取失败: " + e.getMessage());
+                if (showToast) toast("获取失败: " + e.getMessage());
+            } finally {
+                textspaceRunning = false;
+                ui.post(() -> setTextspaceButtons(true));
+            }
+        }).start();
+    }
+
+    private void loadTextspaceNoteById(String noteId) {
+        if (noteId == null || noteId.trim().isEmpty() || textspaceRunning) return;
+        textspaceRunning = true;
+        setTextspaceButtons(false);
+        status("正在读取文本");
+
+        new Thread(() -> {
+            try {
+                saveConfig();
+                NoteDetail note = parseNote(new JSONObject(textspaceRequest("GET", "/api/notes/" + urlPart(noteId), null)));
+                ui.post(() -> applyNote(note));
+            } catch (Exception e) {
+                log("TextSpace 读取失败: " + e.getMessage());
+                toast("读取失败: " + e.getMessage());
             } finally {
                 textspaceRunning = false;
                 ui.post(() -> setTextspaceButtons(true));
@@ -1184,7 +1265,7 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             try {
                 saveConfig();
-                String noteId = textspaceNoteIdEdit.getText().toString().trim();
+                String noteId = currentNote == null ? "" : currentNote.id;
                 String title = textspaceTitleEdit.getText().toString().trim();
                 String content = textspaceContentEdit.getText().toString();
                 if (title.isEmpty()) title = "CF 手机优选结果";
@@ -1211,8 +1292,10 @@ public class MainActivity extends Activity {
                 String finalTitle = title;
                 String finalShareUrl = shareUrl;
                 ui.post(() -> {
-                    textspaceNoteIdEdit.setText(currentNote.id);
                     textspaceTitleEdit.setText(finalTitle);
+                    upsertNoteSummary(currentNote);
+                    updateTextspaceSpinner();
+                    selectNoteInSpinner(currentNote.id);
                     if (!finalShareUrl.isEmpty()) {
                         copyText("textspace-share-url", finalShareUrl, "分享 URL 已复制");
                     }
@@ -1228,11 +1311,128 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    private void confirmDeleteTextspaceNote() {
+        if (currentNote == null || currentNote.id.isEmpty()) {
+            Toast.makeText(this, "当前没有选中文本", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String title = currentNote.title == null || currentNote.title.isEmpty() ? "当前文本" : currentNote.title;
+        new AlertDialog.Builder(this)
+                .setTitle("删除文本")
+                .setMessage("确定删除「" + title + "」吗？")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("删除", (dialog, which) -> deleteTextspaceNote())
+                .show();
+    }
+
+    private void deleteTextspaceNote() {
+        if (currentNote == null || currentNote.id.isEmpty() || textspaceRunning) return;
+        textspaceRunning = true;
+        setTextspaceButtons(false);
+        String deleteId = currentNote.id;
+        status("正在删除文本");
+
+        new Thread(() -> {
+            try {
+                textspaceRequest("DELETE", "/api/notes/" + urlPart(deleteId), null);
+                ui.post(() -> {
+                    removeNoteSummary(deleteId);
+                    currentNote = null;
+                    textspaceTitleEdit.setText("");
+                    textspaceContentEdit.setText("");
+                    updateTextspaceSpinner();
+                    status("已删除文本");
+                    Toast.makeText(this, "已删除文本", Toast.LENGTH_SHORT).show();
+                    if (!textspaceNotes.isEmpty()) {
+                        String nextId = textspaceNotes.get(0).id;
+                        ui.postDelayed(() -> loadTextspaceNoteById(nextId), 250);
+                    }
+                });
+            } catch (Exception e) {
+                log("TextSpace 删除失败: " + e.getMessage());
+                toast("删除失败: " + e.getMessage());
+            } finally {
+                textspaceRunning = false;
+                ui.post(() -> setTextspaceButtons(true));
+            }
+        }).start();
+    }
+
     private void setTextspaceButtons(boolean enabled) {
-        loadNoteButton.setEnabled(enabled);
-        fillResultButton.setEnabled(enabled);
+        refreshNotesButton.setEnabled(enabled);
+        saveResultButton.setEnabled(enabled);
         saveNoteButton.setEnabled(enabled);
         shareNoteButton.setEnabled(enabled);
+        deleteNoteButton.setEnabled(enabled);
+    }
+
+    private void updateTextspaceSpinner() {
+        loadingTextspaceSpinner = true;
+        List<String> titles = new ArrayList<>();
+        if (textspaceNotes.isEmpty()) {
+            titles.add("暂无文本，保存时新建");
+        } else {
+            for (NoteSummary note : textspaceNotes) {
+                String title = note.title == null || note.title.trim().isEmpty() ? "未命名文本" : note.title.trim();
+                titles.add(title);
+            }
+        }
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, titles);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        textspaceNoteSpinner.setAdapter(adapter);
+        if (currentNote != null) selectNoteInSpinner(currentNote.id);
+        loadingTextspaceSpinner = false;
+    }
+
+    private void selectNoteInSpinner(String noteId) {
+        if (noteId == null || noteId.isEmpty()) return;
+        for (int i = 0; i < textspaceNotes.size(); i++) {
+            if (noteId.equals(textspaceNotes.get(i).id)) {
+                textspaceNoteSpinner.setSelection(i, false);
+                return;
+            }
+        }
+    }
+
+    private void applyNote(NoteDetail note) {
+        currentNote = note;
+        textspaceTitleEdit.setText(note.title);
+        textspaceContentEdit.setText(note.content);
+        upsertNoteSummary(note);
+        updateTextspaceSpinner();
+        selectNoteInSpinner(note.id);
+        saveConfig();
+        status("已读取文本：" + note.title);
+    }
+
+    private NoteDetail findDetail(List<NoteDetail> details, String id) {
+        if (details.isEmpty()) return null;
+        if (id != null && !id.isEmpty()) {
+            for (NoteDetail note : details) {
+                if (id.equals(note.id)) return note;
+            }
+        }
+        return null;
+    }
+
+    private void upsertNoteSummary(NoteDetail detail) {
+        if (detail == null || detail.id == null || detail.id.isEmpty()) return;
+        NoteSummary summary = NoteSummary.fromDetail(detail);
+        for (int i = 0; i < textspaceNotes.size(); i++) {
+            if (detail.id.equals(textspaceNotes.get(i).id)) {
+                textspaceNotes.set(i, summary);
+                return;
+            }
+        }
+        textspaceNotes.add(0, summary);
+    }
+
+    private void removeNoteSummary(String id) {
+        List<NoteSummary> next = new ArrayList<>();
+        for (NoteSummary note : textspaceNotes) {
+            if (!id.equals(note.id)) next.add(note);
+        }
+        textspaceNotes = next;
     }
 
     private String textspaceRequest(String method, String path, String body) throws Exception {
@@ -1292,6 +1492,15 @@ public class MainActivity extends Activity {
         note.id = json.optString("id", "");
         note.title = json.optString("title", "");
         note.content = json.optString("content", "");
+        note.shareToken = json.optString("share_token", "");
+        note.updatedAt = json.optLong("updated_at", 0);
+        return note;
+    }
+
+    private NoteSummary parseNoteSummary(JSONObject json) {
+        NoteSummary note = new NoteSummary();
+        note.id = json.optString("id", "");
+        note.title = json.optString("title", "");
         note.shareToken = json.optString("share_token", "");
         note.updatedAt = json.optLong("updated_at", 0);
         return note;
@@ -1560,6 +1769,22 @@ public class MainActivity extends Activity {
 
         String address() {
             return host.contains(":") ? "[" + host + "]:" + port : host + ":" + port;
+        }
+    }
+
+    static class NoteSummary {
+        String id = "";
+        String title = "";
+        String shareToken = "";
+        long updatedAt;
+
+        static NoteSummary fromDetail(NoteDetail detail) {
+            NoteSummary summary = new NoteSummary();
+            summary.id = detail.id;
+            summary.title = detail.title;
+            summary.shareToken = detail.shareToken;
+            summary.updatedAt = detail.updatedAt;
+            return summary;
         }
     }
 
