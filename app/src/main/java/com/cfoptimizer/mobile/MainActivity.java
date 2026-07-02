@@ -75,6 +75,7 @@ public class MainActivity extends Activity {
     private static final int CARD = Color.WHITE;
     private static final int TEXT = Color.rgb(17, 24, 39);
     private static final int MUTED = Color.rgb(100, 116, 139);
+    private static final int MIN_REAL_BYTES = 64 * 1024;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final SecureRandom random = new SecureRandom();
@@ -162,7 +163,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("CF 手机优选");
+        title.setText("CF 手机优选 v1.3");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(TEXT);
@@ -176,7 +177,7 @@ public class MainActivity extends Activity {
         root.addView(sub);
 
         LinearLayout sourceCard = card(root, "IP 数据源");
-        sourceEdit = input(sourceCard, "网络地址或直接粘贴 IP 列表", pref("source", "https://zip.cm.edu.kg/all.txt"), 4, false);
+        sourceEdit = input(sourceCard, "网络地址或直接粘贴 IP 列表", pref("source", "https://zip.cm.edu.kg/all.txt"), 1, false);
         addRegionFilters(sourceCard);
 
         LinearLayout basicCard = card(root, "节点参数");
@@ -232,7 +233,7 @@ public class MainActivity extends Activity {
         actionCard.addView(statusText);
 
         LinearLayout proxyCard = card(root, "ProxyIP 稳定性");
-        proxySourceEdit = input(proxyCard, "ProxyIP 数据源（网络地址或直接粘贴列表）", pref("proxySource", ""), 3, false);
+        proxySourceEdit = input(proxyCard, "ProxyIP 数据源（网络地址或直接粘贴列表）", pref("proxySource", ""), 1, false);
         LinearLayout proxyButtons = row(proxyCard);
         proxyButton = button("测试 ProxyIP", ORANGE);
         proxyButton.setOnClickListener(v -> startProxyTest());
@@ -523,6 +524,12 @@ public class MainActivity extends Activity {
                 Config config = readConfig();
                 config.runId = runId;
                 saveConfig();
+                log("配置：真实测速=" + (config.realCheck ? "开启" : "关闭")
+                        + " UUID=" + (config.uuid.isEmpty() ? "空" : "已填写")
+                        + " Host=" + config.host
+                        + " WS路径=" + config.path
+                        + " 下载URL=" + config.realUrl
+                        + (config.proxyip.isEmpty() ? "" : " ProxyIP=" + config.proxyip));
                 List<Target> targets = loadTargets(sourceEdit.getText().toString(), config.regions, true);
                 log("解析目标 " + targets.size() + " 条");
                 if (targets.isEmpty()) {
@@ -866,7 +873,9 @@ public class MainActivity extends Activity {
                         r.speedMbps = r.speedMbps <= 0 ? speed.mbps : Math.min(r.speedMbps, speed.mbps);
                         r.error = "";
                     } else {
-                        r.error = speed.status > 0 ? "真实测速 HTTP " + speed.status : "真实测速无数据";
+                        r.error = speed.status > 0
+                                ? "真实测速 HTTP " + speed.status + " bytes " + speed.bytes
+                                : "真实测速无数据";
                     }
                 }
             } else {
@@ -1092,7 +1101,9 @@ public class MainActivity extends Activity {
                     .append(" ");
             if (config.realCheck) {
                 out.append(String.format(Locale.US, "%.2fMbps", r.speedMbps))
-                        .append(" 真实").append(r.realSuccesses).append("/").append(config.repeats);
+                        .append(" 真实").append(r.realSuccesses).append("/").append(config.repeats)
+                        .append(" HTTP").append(r.httpStatus)
+                        .append(" bytes").append(r.bytesRead);
             } else {
                 out.append("未真实测速");
             }
@@ -1851,7 +1862,7 @@ public class MainActivity extends Activity {
         double mbps;
 
         boolean ok() {
-            return status >= 200 && status < 400 && bytes > 0;
+            return status >= 200 && status < 300 && bytes >= MIN_REAL_BYTES;
         }
     }
 }
