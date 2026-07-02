@@ -523,6 +523,12 @@ public class MainActivity extends Activity {
                 Config config = readConfig();
                 config.runId = runId;
                 saveConfig();
+                log("配置：真实测速=" + (config.realCheck ? "开启" : "关闭")
+                        + " UUID=" + (config.uuid.isEmpty() ? "空" : "已填写")
+                        + " Host=" + config.host
+                        + " WS路径=" + config.path
+                        + " 下载URL=" + config.realUrl
+                        + (config.proxyip.isEmpty() ? "" : " ProxyIP=" + config.proxyip));
                 List<Target> targets = loadTargets(sourceEdit.getText().toString(), config.regions, true);
                 log("解析目标 " + targets.size() + " 条");
                 if (targets.isEmpty()) {
@@ -1092,7 +1098,9 @@ public class MainActivity extends Activity {
                     .append(" ");
             if (config.realCheck) {
                 out.append(String.format(Locale.US, "%.2fMbps", r.speedMbps))
-                        .append(" 真实").append(r.realSuccesses).append("/").append(config.repeats);
+                        .append(" 真实").append(r.realSuccesses).append("/").append(config.repeats)
+                        .append(" HTTP").append(r.httpStatus)
+                        .append(" bytes").append(r.bytesRead);
             } else {
                 out.append("未真实测速");
             }
