@@ -76,6 +76,7 @@ public class MainActivity extends Activity {
     private static final int TEXT = Color.rgb(17, 24, 39);
     private static final int MUTED = Color.rgb(100, 116, 139);
     private static final int MIN_REAL_BYTES = 64 * 1024;
+    private static final int BODY_SNIPPET_BYTES = 96;
     private static final String DEFAULT_REAL_URL = "http://cachefly.cachefly.net/100mb.test";
     private static final String OLD_REAL_URL = "http://cachefly.cachefly.net/10mb.test";
 
@@ -165,7 +166,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("CF 手机优选 v1.4");
+        title.setText("CF 手机优选 v1.6");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(TEXT);
@@ -863,7 +864,7 @@ public class MainActivity extends Activity {
                     + "Connection: Upgrade\r\n"
                     + "Sec-WebSocket-Key: " + key + "\r\n"
                     + "Sec-WebSocket-Version: 13\r\n"
-                    + "User-Agent: CFMobileOptimizer/1.4\r\n\r\n";
+                    + "User-Agent: CFMobileOptimizer/1.6\r\n\r\n";
             out.write(request.getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
@@ -886,8 +887,9 @@ public class MainActivity extends Activity {
                         r.speedMbps = r.speedMbps <= 0 ? speed.mbps : Math.min(r.speedMbps, speed.mbps);
                         r.error = "";
                     } else {
+                        String hint = speed.bodySnippet.isEmpty() ? "" : " 内容:" + speed.bodySnippet;
                         r.error = speed.status > 0
-                                ? "真实测速 HTTP " + speed.status + " bytes " + speed.bytes
+                                ? "真实测速 HTTP " + speed.status + " bytes " + speed.bytes + hint
                                 : "真实测速无数据";
                     }
                 }
@@ -913,6 +915,7 @@ public class MainActivity extends Activity {
 
         long deadline = System.currentTimeMillis() + config.timeoutMs;
         ByteArrayOutputStream response = new ByteArrayOutputStream();
+        ByteArrayOutputStream bodySample = new ByteArrayOutputStream();
         boolean stripped = false;
         boolean headersDone = false;
         int status = 0;
@@ -935,6 +938,7 @@ public class MainActivity extends Activity {
             }
             if (headersDone) {
                 body += frame.length;
+                rememberBodySample(bodySample, frame, 0, frame.length);
                 continue;
             }
             response.write(frame);
@@ -944,7 +948,10 @@ public class MainActivity extends Activity {
             String head = new String(data, 0, headerEnd, StandardCharsets.ISO_8859_1);
             String first = head.split("\\r?\\n", 2)[0];
             status = parseStatus(first);
-            body += data.length - headerEnd - 4;
+            int bodyStart = headerEnd + 4;
+            int bodyLen = data.length - bodyStart;
+            body += bodyLen;
+            rememberBodySample(bodySample, data, bodyStart, bodyLen);
             headersDone = true;
         }
         double seconds = Math.max(elapsedMs(start) / 1000.0, 0.001);
@@ -952,6 +959,7 @@ public class MainActivity extends Activity {
         speed.status = status;
         speed.bytes = body;
         speed.mbps = body * 8.0 / seconds / 1_000_000.0;
+        speed.bodySnippet = sanitizeSnippet(bodySample.toByteArray());
         return speed;
     }
 
@@ -976,7 +984,7 @@ public class MainActivity extends Activity {
         String path = target.getFile().isEmpty() ? "/" : target.getFile();
         String request = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: " + host + "\r\n"
-                + "User-Agent: CFMobileOptimizer/1.4\r\n"
+                + "User-Agent: CFMobileOptimizer/1.6\r\n"
                 + "Accept: */*\r\n"
                 + "Connection: close\r\n\r\n";
         out.write(request.getBytes(StandardCharsets.US_ASCII));
@@ -989,7 +997,7 @@ public class MainActivity extends Activity {
             HttpURLConnection conn = (HttpURLConnection) new URL(text).openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
-            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.4");
+            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.6");
             try (InputStream in = conn.getInputStream()) {
                 text = new String(readAll(in), StandardCharsets.UTF_8);
             }
@@ -1505,7 +1513,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setRequestProperty("Authorization", "Bearer " + textspaceToken());
         conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.4");
+        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.6");
         if (body != null) {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
@@ -1668,6 +1676,30 @@ public class MainActivity extends Activity {
         int n;
         while ((n = in.read(buf)) >= 0) out.write(buf, 0, n);
         return out.toByteArray();
+    }
+
+    private void rememberBodySample(ByteArrayOutputStream sample, byte[] data, int offset, int len) {
+        if (sample.size() >= BODY_SNIPPET_BYTES || data == null || len <= 0) return;
+        int safeOffset = Math.max(0, offset);
+        int safeLen = Math.min(len, data.length - safeOffset);
+        if (safeLen <= 0) return;
+        int copy = Math.min(safeLen, BODY_SNIPPET_BYTES - sample.size());
+        sample.write(data, safeOffset, copy);
+    }
+
+    private String sanitizeSnippet(byte[] data) {
+        if (data == null || data.length == 0) return "";
+        String text = new String(data, StandardCharsets.UTF_8)
+                .replace('\r', ' ')
+                .replace('\n', ' ')
+                .replace('\t', ' ')
+                .trim();
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (!Character.isISOControl(ch)) out.append(ch);
+        }
+        return out.toString();
     }
 
     private byte[] randomBytes(int len) {
@@ -1873,6 +1905,7 @@ public class MainActivity extends Activity {
         int status;
         int bytes;
         double mbps;
+        String bodySnippet = "";
 
         boolean ok() {
             return status >= 200 && status < 300 && bytes >= MIN_REAL_BYTES;
