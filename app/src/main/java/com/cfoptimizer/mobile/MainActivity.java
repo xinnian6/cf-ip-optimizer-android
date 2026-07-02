@@ -76,6 +76,8 @@ public class MainActivity extends Activity {
     private static final int TEXT = Color.rgb(17, 24, 39);
     private static final int MUTED = Color.rgb(100, 116, 139);
     private static final int MIN_REAL_BYTES = 64 * 1024;
+    private static final String DEFAULT_REAL_URL = "http://cachefly.cachefly.net/100mb.test";
+    private static final String OLD_REAL_URL = "http://cachefly.cachefly.net/10mb.test";
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final SecureRandom random = new SecureRandom();
@@ -163,7 +165,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("CF 手机优选 v1.3");
+        title.setText("CF 手机优选 v1.4");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(TEXT);
@@ -185,7 +187,7 @@ public class MainActivity extends Activity {
         pathEdit = input(basicCard, "WS 路径", pref("path", "/"), 1, false);
         uuidEdit = input(basicCard, "VLESS UUID（不填则只验证 WS 握手）", pref("uuid", ""), 1, false);
         proxyEdit = input(basicCard, "组合测试 ProxyIP（可留空，只支持一个）", pref("proxyip", ""), 1, false);
-        realUrlEdit = input(basicCard, "真实下载 URL", pref("realUrl", "http://cachefly.cachefly.net/10mb.test"), 1, false);
+        realUrlEdit = input(basicCard, "真实下载 URL", prefRealUrl(), 1, false);
         hashPrefixEdit = input(basicCard, "复制名称前缀（放在 # 后面，可留空）", pref("hashPrefix", ""), 1, false);
         lineSuffixEdit = input(basicCard, "复制行尾追加（放在每行最后，可留空）", pref("lineSuffix", ""), 1, false);
 
@@ -626,6 +628,9 @@ public class MainActivity extends Activity {
         c.regions = selectedRegions();
         if (c.host.isEmpty()) throw new IllegalArgumentException("请填写 SNI/Host 域名");
         if (realCheck.isChecked() && !c.uuid.isEmpty()) UUID.fromString(c.uuid);
+        if (c.realCheck && !c.realUrl.toLowerCase(Locale.ROOT).startsWith("http://")) {
+            throw new IllegalArgumentException("真实下载 URL 目前请使用 http:// 大文件地址");
+        }
         if (realCheck.isChecked() && c.uuid.isEmpty()) log("未填写 UUID，本次只验证 WS 握手，不做真实下载测速");
         return c;
     }
@@ -696,6 +701,14 @@ public class MainActivity extends Activity {
 
     private String pref(String key, String fallback) {
         return prefs.getString(key, fallback);
+    }
+
+    private String prefRealUrl() {
+        String value = prefs.getString("realUrl", DEFAULT_REAL_URL);
+        if (value == null || value.trim().isEmpty() || OLD_REAL_URL.equals(value.trim())) {
+            return DEFAULT_REAL_URL;
+        }
+        return value;
     }
 
     private List<Result> runTcpScan(List<Target> targets, Config config) throws InterruptedException {
@@ -850,7 +863,7 @@ public class MainActivity extends Activity {
                     + "Connection: Upgrade\r\n"
                     + "Sec-WebSocket-Key: " + key + "\r\n"
                     + "Sec-WebSocket-Version: 13\r\n"
-                    + "User-Agent: CFMobileOptimizer/1.1\r\n\r\n";
+                    + "User-Agent: CFMobileOptimizer/1.4\r\n\r\n";
             out.write(request.getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
@@ -963,7 +976,7 @@ public class MainActivity extends Activity {
         String path = target.getFile().isEmpty() ? "/" : target.getFile();
         String request = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: " + host + "\r\n"
-                + "User-Agent: CFMobileOptimizer/1.1\r\n"
+                + "User-Agent: CFMobileOptimizer/1.4\r\n"
                 + "Accept: */*\r\n"
                 + "Connection: close\r\n\r\n";
         out.write(request.getBytes(StandardCharsets.US_ASCII));
@@ -976,7 +989,7 @@ public class MainActivity extends Activity {
             HttpURLConnection conn = (HttpURLConnection) new URL(text).openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
-            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.1");
+            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.4");
             try (InputStream in = conn.getInputStream()) {
                 text = new String(readAll(in), StandardCharsets.UTF_8);
             }
@@ -1492,7 +1505,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setRequestProperty("Authorization", "Bearer " + textspaceToken());
         conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.2");
+        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.4");
         if (body != null) {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
