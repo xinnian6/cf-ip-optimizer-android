@@ -4,13 +4,19 @@ import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.SharedPreferences;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.InputType;
+import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.CheckBox;
+import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
@@ -35,6 +41,7 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -52,10 +59,21 @@ import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 
 public class MainActivity extends Activity {
+    private static final String PREFS = "cf_optimizer_mobile";
+    private static final int BLUE = Color.rgb(37, 99, 235);
+    private static final int GREEN = Color.rgb(22, 163, 74);
+    private static final int ORANGE = Color.rgb(234, 88, 12);
+    private static final int BG = Color.rgb(246, 247, 251);
+    private static final int CARD = Color.WHITE;
+    private static final int TEXT = Color.rgb(17, 24, 39);
+    private static final int MUTED = Color.rgb(100, 116, 139);
+
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final SecureRandom random = new SecureRandom();
 
+    private SharedPreferences prefs;
     private EditText sourceEdit;
+    private EditText proxySourceEdit;
     private EditText hostEdit;
     private EditText pathEdit;
     private EditText uuidEdit;
@@ -68,112 +86,199 @@ public class MainActivity extends Activity {
     private EditText minSpeedEdit;
     private EditText realUrlEdit;
     private CheckBox realCheck;
+    private CheckBox allRegionCheck;
+    private CheckBox hkCheck;
+    private CheckBox sgCheck;
+    private CheckBox jpCheck;
+    private CheckBox krCheck;
+    private CheckBox usCheck;
+    private CheckBox twCheck;
     private Button startButton;
     private Button copyButton;
+    private Button proxyButton;
+    private Button copyProxyTopButton;
     private ProgressBar progress;
     private TextView statusText;
     private TextView resultText;
+    private TextView proxyResultText;
     private TextView logText;
+    private LinearLayout proxyButtonList;
 
     private volatile boolean running = false;
     private List<Result> lastResults = new ArrayList<>();
+    private List<ProxyResult> lastProxyResults = new ArrayList<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         buildUi();
     }
 
     private void buildUi() {
         ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(BG);
+
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(14), dp(12), dp(14), dp(16));
+        root.setPadding(dp(14), dp(12), dp(14), dp(18));
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("CF 手机优选测速");
-        title.setTextSize(22);
-        title.setPadding(0, 0, 0, dp(8));
+        title.setText("CF 手机优选");
+        title.setTextSize(24);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(TEXT);
         root.addView(title);
 
-        sourceEdit = input(root, "IP 数据源 URL 或直接粘贴 IP 列表", "https://zip.cm.edu.kg/all.txt", false);
-        hostEdit = input(root, "SNI/Host 域名", "xinnian.us.ci", false);
-        pathEdit = input(root, "WS 路径", "/", false);
-        uuidEdit = input(root, "VLESS UUID", "", false);
-        proxyEdit = input(root, "组合测试 ProxyIP（只填一个，可留空）", "", false);
-        realUrlEdit = input(root, "真实测速 URL", "http://cachefly.cachefly.net/10mb.test", false);
+        TextView sub = new TextView(this);
+        sub.setText("按地区筛选 IP，验证 WS 握手和真实下载，也可以单独测试 ProxyIP。");
+        sub.setTextSize(13);
+        sub.setTextColor(MUTED);
+        sub.setPadding(0, dp(3), 0, dp(10));
+        root.addView(sub);
 
-        LinearLayout row1 = row(root);
-        timeoutEdit = smallInput(row1, "超时秒", "8");
-        concurrencyEdit = smallInput(row1, "并发", "32");
-        candidatesEdit = smallInput(row1, "候选", "100");
+        LinearLayout sourceCard = card(root, "IP 数据源");
+        sourceEdit = input(sourceCard, "网络地址或直接粘贴 IP 列表", pref("source", "https://zip.cm.edu.kg/all.txt"), 4, false);
+        addRegionFilters(sourceCard);
 
-        LinearLayout row2 = row(root);
-        repeatsEdit = smallInput(row2, "复测", "2");
-        downloadMbEdit = smallInput(row2, "下载MiB", "2");
-        minSpeedEdit = smallInput(row2, "最低Mbps", "80");
+        LinearLayout basicCard = card(root, "节点参数");
+        hostEdit = input(basicCard, "SNI / Host 域名", pref("host", "xinnian.us.ci"), 1, false);
+        pathEdit = input(basicCard, "WS 路径", pref("path", "/"), 1, false);
+        uuidEdit = input(basicCard, "VLESS UUID（不填则只验证 WS 握手）", pref("uuid", ""), 1, false);
+        proxyEdit = input(basicCard, "组合测试 ProxyIP（可留空，只支持一个）", pref("proxyip", ""), 1, false);
+        realUrlEdit = input(basicCard, "真实下载 URL", pref("realUrl", "http://cachefly.cachefly.net/10mb.test"), 1, false);
 
         realCheck = new CheckBox(this);
-        realCheck.setText("真实节点测速：VLESS 下载验证");
-        realCheck.setChecked(true);
-        root.addView(realCheck);
+        realCheck.setText("开启真实下载测速（需要 UUID）");
+        realCheck.setChecked(prefs.getBoolean("realCheck", true));
+        basicCard.addView(realCheck);
 
-        LinearLayout buttons = row(root);
-        startButton = new Button(this);
-        startButton.setText("开始测速");
+        LinearLayout paramCard = card(root, "测速参数");
+        LinearLayout row1 = row(paramCard);
+        timeoutEdit = smallInput(row1, "超时秒", pref("timeout", "8"));
+        concurrencyEdit = smallInput(row1, "并发", pref("concurrency", "32"));
+        candidatesEdit = smallInput(row1, "候选数", pref("candidates", "100"));
+
+        LinearLayout row2 = row(paramCard);
+        repeatsEdit = smallInput(row2, "复测次数", pref("repeats", "2"));
+        downloadMbEdit = smallInput(row2, "单 IP 下载 MiB", pref("downloadMb", "2"));
+        minSpeedEdit = smallInput(row2, "最低 Mbps", pref("minSpeed", "80"));
+
+        LinearLayout actionCard = card(root, "操作");
+        LinearLayout buttons = row(actionCard);
+        startButton = button("开始测速", BLUE);
         startButton.setOnClickListener(v -> startScan());
-        buttons.addView(startButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        buttons.addView(startButton, new LinearLayout.LayoutParams(0, dp(46), 1));
 
-        copyButton = new Button(this);
-        copyButton.setText("复制结果");
+        copyButton = button("复制测速结果", GREEN);
         copyButton.setOnClickListener(v -> copyResults());
-        buttons.addView(copyButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        LinearLayout.LayoutParams copyLp = new LinearLayout.LayoutParams(0, dp(46), 1);
+        copyLp.leftMargin = dp(8);
+        buttons.addView(copyButton, copyLp);
 
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(100);
-        root.addView(progress);
+        LinearLayout.LayoutParams progressLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(10));
+        progressLp.topMargin = dp(10);
+        actionCard.addView(progress, progressLp);
 
         statusText = new TextView(this);
         statusText.setText("就绪");
-        statusText.setPadding(0, dp(6), 0, dp(6));
-        root.addView(statusText);
+        statusText.setTextColor(MUTED);
+        statusText.setPadding(0, dp(7), 0, 0);
+        actionCard.addView(statusText);
 
-        TextView resultTitle = new TextView(this);
-        resultTitle.setText("测速结果");
-        resultTitle.setTextSize(18);
-        root.addView(resultTitle);
+        LinearLayout proxyCard = card(root, "ProxyIP 稳定性");
+        proxySourceEdit = input(proxyCard, "ProxyIP 数据源（网络地址或直接粘贴列表）", pref("proxySource", ""), 3, false);
+        LinearLayout proxyButtons = row(proxyCard);
+        proxyButton = button("测试 ProxyIP", ORANGE);
+        proxyButton.setOnClickListener(v -> startProxyTest());
+        proxyButtons.addView(proxyButton, new LinearLayout.LayoutParams(0, dp(46), 1));
 
-        resultText = new TextView(this);
-        resultText.setTextIsSelectable(true);
-        resultText.setTextSize(13);
-        root.addView(resultText);
+        copyProxyTopButton = button("复制前十", GREEN);
+        copyProxyTopButton.setOnClickListener(v -> copyProxyTop());
+        LinearLayout.LayoutParams proxyCopyLp = new LinearLayout.LayoutParams(0, dp(46), 1);
+        proxyCopyLp.leftMargin = dp(8);
+        proxyButtons.addView(copyProxyTopButton, proxyCopyLp);
 
-        TextView logTitle = new TextView(this);
-        logTitle.setText("运行日志");
-        logTitle.setTextSize(18);
-        logTitle.setPadding(0, dp(10), 0, 0);
-        root.addView(logTitle);
+        proxyButtonList = new LinearLayout(this);
+        proxyButtonList.setOrientation(LinearLayout.VERTICAL);
+        proxyCard.addView(proxyButtonList);
 
-        logText = new TextView(this);
-        logText.setTextIsSelectable(true);
-        logText.setTextSize(12);
-        root.addView(logText);
+        proxyResultText = monoText();
+        proxyCard.addView(proxyResultText);
+
+        LinearLayout resultCard = card(root, "测速结果");
+        resultText = monoText();
+        resultCard.addView(resultText);
+
+        LinearLayout logCard = card(root, "运行日志");
+        logText = monoText();
+        logCard.addView(logText);
 
         setContentView(scroll);
     }
 
-    private EditText input(LinearLayout root, String label, String value, boolean number) {
-        TextView text = new TextView(this);
-        text.setText(label);
+    private LinearLayout card(LinearLayout root, String titleText) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(12), dp(10), dp(12), dp(12));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(CARD);
+        bg.setCornerRadius(dp(8));
+        box.setBackground(bg);
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        lp.topMargin = dp(10);
+        root.addView(box, lp);
+
+        TextView title = new TextView(this);
+        title.setText(titleText);
+        title.setTextSize(17);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(TEXT);
+        title.setPadding(0, 0, 0, dp(8));
+        box.addView(title);
+        return box;
+    }
+
+    private EditText input(LinearLayout root, String label, String value, int minLines, boolean number) {
+        TextView text = label(label);
         root.addView(text);
         EditText edit = new EditText(this);
-        edit.setSingleLine(false);
-        edit.setMinLines(label.contains("数据源") ? 2 : 1);
+        edit.setSingleLine(minLines <= 1);
+        edit.setMinLines(minLines);
         edit.setText(value);
+        edit.setTextSize(14);
+        edit.setTextColor(TEXT);
+        edit.setSelectAllOnFocus(false);
+        edit.setPadding(dp(10), dp(6), dp(10), dp(6));
         if (number) edit.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        root.addView(edit);
+        root.addView(edit, fieldLp());
         return edit;
+    }
+
+    private TextView label(String value) {
+        TextView text = new TextView(this);
+        text.setText(value);
+        text.setTextSize(13);
+        text.setTextColor(MUTED);
+        text.setPadding(0, dp(5), 0, 0);
+        return text;
+    }
+
+    private LinearLayout.LayoutParams fieldLp() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        lp.bottomMargin = dp(5);
+        return lp;
     }
 
     private LinearLayout row(LinearLayout root) {
@@ -186,16 +291,90 @@ public class MainActivity extends Activity {
     private EditText smallInput(LinearLayout row, String label, String value) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
-        TextView text = new TextView(this);
-        text.setText(label);
+        TextView text = label(label);
         box.addView(text);
         EditText edit = new EditText(this);
         edit.setSingleLine(true);
         edit.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
         edit.setText(value);
-        box.addView(edit);
-        row.addView(box, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        edit.setTextSize(14);
+        edit.setTextColor(TEXT);
+        edit.setGravity(Gravity.CENTER_VERTICAL);
+        edit.setPadding(dp(8), 0, dp(8), 0);
+        box.addView(edit, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+        lp.rightMargin = dp(6);
+        row.addView(box, lp);
         return edit;
+    }
+
+    private Button button(String text, int color) {
+        Button b = new Button(this);
+        b.setText(text);
+        b.setTextColor(Color.WHITE);
+        b.setTextSize(15);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(color);
+        bg.setCornerRadius(dp(8));
+        b.setBackground(bg);
+        return b;
+    }
+
+    private TextView monoText() {
+        TextView view = new TextView(this);
+        view.setTextIsSelectable(true);
+        view.setTextSize(12);
+        view.setTextColor(TEXT);
+        view.setTypeface(Typeface.MONOSPACE);
+        view.setPadding(0, dp(4), 0, 0);
+        return view;
+    }
+
+    private void addRegionFilters(LinearLayout root) {
+        TextView label = label("区域筛选（全不选时测试全部）");
+        root.addView(label);
+
+        LinearLayout rowA = row(root);
+        allRegionCheck = regionCheck(rowA, "全部", prefs.getBoolean("regionAll", true));
+        hkCheck = regionCheck(rowA, "香港", prefs.getBoolean("regionHK", true));
+        sgCheck = regionCheck(rowA, "新加坡", prefs.getBoolean("regionSG", true));
+        jpCheck = regionCheck(rowA, "日本", prefs.getBoolean("regionJP", true));
+
+        LinearLayout rowB = row(root);
+        krCheck = regionCheck(rowB, "韩国", prefs.getBoolean("regionKR", true));
+        usCheck = regionCheck(rowB, "美国", prefs.getBoolean("regionUS", true));
+        twCheck = regionCheck(rowB, "台湾", prefs.getBoolean("regionTW", true));
+
+        allRegionCheck.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (buttonView.isPressed()) setRegionChecks(isChecked);
+        });
+        CompoundButton.OnCheckedChangeListener childListener = (buttonView, isChecked) -> {
+            if (buttonView.isPressed() && !isChecked) allRegionCheck.setChecked(false);
+        };
+        hkCheck.setOnCheckedChangeListener(childListener);
+        sgCheck.setOnCheckedChangeListener(childListener);
+        jpCheck.setOnCheckedChangeListener(childListener);
+        krCheck.setOnCheckedChangeListener(childListener);
+        usCheck.setOnCheckedChangeListener(childListener);
+        twCheck.setOnCheckedChangeListener(childListener);
+    }
+
+    private CheckBox regionCheck(LinearLayout row, String text, boolean checked) {
+        CheckBox cb = new CheckBox(this);
+        cb.setText(text);
+        cb.setTextSize(13);
+        cb.setChecked(checked);
+        row.addView(cb, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        return cb;
+    }
+
+    private void setRegionChecks(boolean checked) {
+        hkCheck.setChecked(checked);
+        sgCheck.setChecked(checked);
+        jpCheck.setChecked(checked);
+        krCheck.setChecked(checked);
+        usCheck.setChecked(checked);
+        twCheck.setChecked(checked);
     }
 
     private void startScan() {
@@ -211,10 +390,11 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             try {
                 Config config = readConfig();
-                List<Target> targets = loadTargets(sourceEdit.getText().toString());
+                saveConfig();
+                List<Target> targets = loadTargets(sourceEdit.getText().toString(), config.regions, true);
                 log("解析目标 " + targets.size() + " 条");
                 if (targets.isEmpty()) {
-                    toast("没有解析到 IP");
+                    toast("没有解析到符合区域的 IP");
                     return;
                 }
 
@@ -223,12 +403,16 @@ public class MainActivity extends Activity {
                 if (tcpOk.size() > config.candidates) {
                     tcpOk = new ArrayList<>(tcpOk.subList(0, config.candidates));
                 }
-                log("TCP 初筛可用 " + tcpOk.size() + " 条，进入深度测速");
+                log("TCP 可连接 " + tcpOk.size() + " 条，进入 WS / 真实测速");
 
                 List<Result> checked = runWsScan(tcpOk, config);
                 checked.sort((a, b) -> {
-                    int ok = Boolean.compare(b.ok, a.ok);
-                    if (ok != 0) return ok;
+                    int fast = Boolean.compare(b.fastOk, a.fastOk);
+                    if (fast != 0) return fast;
+                    int real = Boolean.compare(b.realOk, a.realOk);
+                    if (real != 0) return real;
+                    int ws = Boolean.compare(b.handshakeOk, a.handshakeOk);
+                    if (ws != 0) return ws;
                     int speed = Double.compare(b.speedMbps, a.speedMbps);
                     if (speed != 0) return speed;
                     return Double.compare(a.tcpMs, b.tcpMs);
@@ -245,23 +429,124 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    private void startProxyTest() {
+        if (running) return;
+        running = true;
+        proxyButton.setEnabled(false);
+        proxyResultText.setText("");
+        proxyButtonList.removeAllViews();
+        lastProxyResults = new ArrayList<>();
+        progress.setProgress(0);
+        status("正在测试 ProxyIP");
+
+        new Thread(() -> {
+            try {
+                Config config = readConfig();
+                saveConfig();
+                List<Target> proxies = loadTargets(proxySourceEdit.getText().toString(), Collections.emptySet(), false);
+                if (proxies.isEmpty()) {
+                    toast("没有解析到 ProxyIP");
+                    return;
+                }
+                log("解析 ProxyIP " + proxies.size() + " 条");
+                List<ProxyResult> results = runProxyTcpScan(proxies, config);
+                results.sort((a, b) -> {
+                    int ok = Integer.compare(b.successes, a.successes);
+                    if (ok != 0) return ok;
+                    return Double.compare(a.bestMs, b.bestMs);
+                });
+                lastProxyResults = results;
+                ui.post(() -> showProxyResults(results, config));
+            } catch (Exception e) {
+                log("ProxyIP 错误: " + e.getMessage());
+                toast("ProxyIP 测试失败: " + e.getMessage());
+            } finally {
+                running = false;
+                ui.post(() -> proxyButton.setEnabled(true));
+            }
+        }).start();
+    }
+
     private Config readConfig() {
         Config c = new Config();
         c.host = hostEdit.getText().toString().trim();
         c.path = pathEdit.getText().toString().trim();
         c.uuid = uuidEdit.getText().toString().trim();
-        c.proxyip = proxyEdit.getText().toString().trim().split("\\s+")[0];
+        c.proxyip = firstToken(proxyEdit.getText().toString().trim());
         c.realUrl = realUrlEdit.getText().toString().trim();
-        c.timeoutMs = Math.max(1000, (int) (Double.parseDouble(timeoutEdit.getText().toString()) * 1000));
-        c.concurrency = Math.max(1, Integer.parseInt(concurrencyEdit.getText().toString()));
-        c.candidates = Math.max(1, Integer.parseInt(candidatesEdit.getText().toString()));
-        c.repeats = Math.max(1, Integer.parseInt(repeatsEdit.getText().toString()));
-        c.downloadBytes = Math.max(1, (int) (Double.parseDouble(downloadMbEdit.getText().toString()) * 1024 * 1024));
-        c.minSpeedMbps = Math.max(0, Double.parseDouble(minSpeedEdit.getText().toString()));
+        c.timeoutMs = Math.max(500, (int) (parseDouble(timeoutEdit, 8) * 1000));
+        c.concurrency = clamp((int) parseDouble(concurrencyEdit, 32), 1, 256);
+        c.candidates = clamp((int) parseDouble(candidatesEdit, 100), 1, 5000);
+        c.repeats = clamp((int) parseDouble(repeatsEdit, 2), 1, 10);
+        c.downloadBytes = Math.max(1, (int) (parseDouble(downloadMbEdit, 2) * 1024 * 1024));
+        c.minSpeedMbps = Math.max(0, parseDouble(minSpeedEdit, 80));
         c.realCheck = realCheck.isChecked() && !c.uuid.isEmpty();
+        c.regions = selectedRegions();
         if (c.host.isEmpty()) throw new IllegalArgumentException("请填写 SNI/Host 域名");
-        if (c.realCheck) UUID.fromString(c.uuid);
+        if (realCheck.isChecked() && !c.uuid.isEmpty()) UUID.fromString(c.uuid);
+        if (realCheck.isChecked() && c.uuid.isEmpty()) log("未填写 UUID，本次只验证 WS 握手，不做真实下载测速");
         return c;
+    }
+
+    private double parseDouble(EditText edit, double fallback) {
+        try {
+            return Double.parseDouble(edit.getText().toString().trim());
+        } catch (Exception e) {
+            return fallback;
+        }
+    }
+
+    private int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private String firstToken(String text) {
+        if (text == null) return "";
+        String trimmed = text.trim();
+        if (trimmed.isEmpty()) return "";
+        return trimmed.split("[,;\\s]+")[0].trim();
+    }
+
+    private Set<String> selectedRegions() {
+        if (allRegionCheck.isChecked()) return Collections.emptySet();
+        Set<String> regions = new LinkedHashSet<>();
+        if (hkCheck.isChecked()) regions.add("HK");
+        if (sgCheck.isChecked()) regions.add("SG");
+        if (jpCheck.isChecked()) regions.add("JP");
+        if (krCheck.isChecked()) regions.add("KR");
+        if (usCheck.isChecked()) regions.add("US");
+        if (twCheck.isChecked()) regions.add("TW");
+        return regions;
+    }
+
+    private void saveConfig() {
+        prefs.edit()
+                .putString("source", sourceEdit.getText().toString())
+                .putString("proxySource", proxySourceEdit.getText().toString())
+                .putString("host", hostEdit.getText().toString())
+                .putString("path", pathEdit.getText().toString())
+                .putString("uuid", uuidEdit.getText().toString())
+                .putString("proxyip", proxyEdit.getText().toString())
+                .putString("realUrl", realUrlEdit.getText().toString())
+                .putString("timeout", timeoutEdit.getText().toString())
+                .putString("concurrency", concurrencyEdit.getText().toString())
+                .putString("candidates", candidatesEdit.getText().toString())
+                .putString("repeats", repeatsEdit.getText().toString())
+                .putString("downloadMb", downloadMbEdit.getText().toString())
+                .putString("minSpeed", minSpeedEdit.getText().toString())
+                .putBoolean("realCheck", realCheck.isChecked())
+                .putBoolean("regionAll", allRegionCheck.isChecked())
+                .putBoolean("regionHK", hkCheck.isChecked())
+                .putBoolean("regionSG", sgCheck.isChecked())
+                .putBoolean("regionJP", jpCheck.isChecked())
+                .putBoolean("regionKR", krCheck.isChecked())
+                .putBoolean("regionUS", usCheck.isChecked())
+                .putBoolean("regionTW", twCheck.isChecked())
+                .apply();
+    }
+
+    private String pref(String key, String fallback) {
+        return prefs.getString(key, fallback);
     }
 
     private List<Result> runTcpScan(List<Target> targets, Config config) throws InterruptedException {
@@ -280,7 +565,7 @@ public class MainActivity extends Activity {
                     r.error = shortError(e);
                 }
                 int n = done.incrementAndGet();
-                if (n % 20 == 0 || n == targets.size()) progress("tcp", n, targets.size());
+                if (n % 20 == 0 || n == targets.size()) progress("TCP 初筛", n, targets.size());
                 return r;
             }));
         }
@@ -298,6 +583,42 @@ public class MainActivity extends Activity {
         return out;
     }
 
+    private List<ProxyResult> runProxyTcpScan(List<Target> proxies, Config config) throws InterruptedException {
+        ExecutorService pool = Executors.newFixedThreadPool(config.concurrency);
+        List<Future<ProxyResult>> futures = new ArrayList<>();
+        AtomicInteger done = new AtomicInteger();
+        for (Target proxy : proxies) {
+            futures.add(pool.submit(() -> {
+                ProxyResult r = new ProxyResult(proxy);
+                for (int i = 0; i < config.repeats; i++) {
+                    long start = System.nanoTime();
+                    try (Socket socket = new Socket()) {
+                        socket.connect(new InetSocketAddress(proxy.host, proxy.port), config.timeoutMs);
+                        double ms = elapsedMs(start);
+                        r.successes++;
+                        r.bestMs = r.bestMs <= 0 ? ms : Math.min(r.bestMs, ms);
+                    } catch (Exception e) {
+                        r.error = shortError(e);
+                    }
+                }
+                int n = done.incrementAndGet();
+                progress("ProxyIP", n, proxies.size());
+                return r;
+            }));
+        }
+        pool.shutdown();
+        pool.awaitTermination(30, TimeUnit.MINUTES);
+
+        List<ProxyResult> out = new ArrayList<>();
+        for (Future<ProxyResult> f : futures) {
+            try {
+                out.add(f.get());
+            } catch (Exception ignored) {
+            }
+        }
+        return out;
+    }
+
     private List<Result> runWsScan(List<Result> candidates, Config config) throws InterruptedException {
         ExecutorService pool = Executors.newFixedThreadPool(config.concurrency);
         List<Future<Result>> futures = new ArrayList<>();
@@ -308,10 +629,11 @@ public class MainActivity extends Activity {
                 for (int i = 0; i < config.repeats; i++) {
                     probeWs(r, config);
                 }
-                r.successRate = r.successes / (double) config.repeats;
-                r.ok = r.successes == config.repeats && (!config.realCheck || r.speedMbps >= config.minSpeedMbps);
+                r.handshakeOk = r.wsSuccesses > 0;
+                r.realOk = config.realCheck ? r.realSuccesses > 0 : r.handshakeOk;
+                r.fastOk = r.realOk && (!config.realCheck || r.speedMbps >= config.minSpeedMbps);
                 int n = done.incrementAndGet();
-                progress("ws", n, candidates.size());
+                progress("WS / 真实测速", n, candidates.size());
                 return r;
             }));
         }
@@ -352,7 +674,7 @@ public class MainActivity extends Activity {
                     + "Connection: Upgrade\r\n"
                     + "Sec-WebSocket-Key: " + key + "\r\n"
                     + "Sec-WebSocket-Version: 13\r\n"
-                    + "User-Agent: CFMobileOptimizer/1.0\r\n\r\n";
+                    + "User-Agent: CFMobileOptimizer/1.1\r\n\r\n";
             out.write(request.getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
@@ -364,21 +686,19 @@ public class MainActivity extends Activity {
                 if (line == null || line.length() == 0) break;
             }
             if (http == 101) {
-                r.wsOk = true;
+                r.wsSuccesses++;
+                r.error = "";
                 if (config.realCheck) {
                     RealSpeed speed = vlessHttpSpeed(in, out, config);
                     r.httpStatus = speed.status;
                     r.bytesRead += speed.bytes;
                     if (speed.ok()) {
-                        r.successes++;
-                        r.speedMbps = r.speedMbps == 0 ? speed.mbps : Math.min(r.speedMbps, speed.mbps);
+                        r.realSuccesses++;
+                        r.speedMbps = Math.max(r.speedMbps, speed.mbps);
                         r.error = "";
                     } else {
-                        r.error = speed.status > 0 ? "HTTP " + speed.status : "真实测速无响应";
+                        r.error = speed.status > 0 ? "真实测速 HTTP " + speed.status : "真实测速无数据";
                     }
-                } else {
-                    r.successes++;
-                    r.error = "";
                 }
             } else {
                 r.error = "WS HTTP " + http;
@@ -465,20 +785,20 @@ public class MainActivity extends Activity {
         String path = target.getFile().isEmpty() ? "/" : target.getFile();
         String request = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: " + host + "\r\n"
-                + "User-Agent: CFMobileOptimizer/1.0\r\n"
+                + "User-Agent: CFMobileOptimizer/1.1\r\n"
                 + "Accept: */*\r\n"
                 + "Connection: close\r\n\r\n";
         out.write(request.getBytes(StandardCharsets.US_ASCII));
         return out.toByteArray();
     }
 
-    private List<Target> loadTargets(String source) throws Exception {
+    private List<Target> loadTargets(String source, Set<String> regionFilter, boolean filterByRegion) throws Exception {
         String text = source.trim();
         if (text.startsWith("http://") || text.startsWith("https://")) {
             HttpURLConnection conn = (HttpURLConnection) new URL(text).openConnection();
             conn.setConnectTimeout(15000);
-            conn.setReadTimeout(20000);
-            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.0");
+            conn.setReadTimeout(30000);
+            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.1");
             try (InputStream in = conn.getInputStream()) {
                 text = new String(readAll(in), StandardCharsets.UTF_8);
             }
@@ -487,11 +807,15 @@ public class MainActivity extends Activity {
         Set<String> seen = new HashSet<>();
         for (String rawLine : text.split("\\r?\\n")) {
             String line = rawLine.trim();
-            if (line.isEmpty()) continue;
+            if (line.isEmpty() || line.startsWith("#")) continue;
             for (String token : line.split("[,;\\s]+")) {
                 List<Target> parsed = parseTargets(token);
                 for (Target t : parsed) {
-                    String key = t.host + ":" + t.port;
+                    if (filterByRegion && !regionFilter.isEmpty()) {
+                        String code = normalizeRegion(t.region);
+                        if (!regionFilter.contains(code)) continue;
+                    }
+                    String key = t.host + ":" + t.port + "#" + normalizeRegion(t.region);
                     if (seen.add(key)) targets.add(t);
                 }
             }
@@ -507,7 +831,7 @@ public class MainActivity extends Activity {
             String region = "";
             int hash = value.indexOf('#');
             if (hash >= 0) {
-                region = value.substring(hash + 1).trim().toUpperCase(Locale.ROOT);
+                region = normalizeRegion(value.substring(hash + 1).trim());
                 value = value.substring(0, hash).trim();
             }
             int port = 443;
@@ -525,7 +849,7 @@ public class MainActivity extends Activity {
             }
             if (host.contains("/") && !host.contains(":")) {
                 out.addAll(expandIpv4Cidr(host, port, region));
-            } else {
+            } else if (!host.isEmpty()) {
                 out.add(new Target(host, port, region));
             }
         } catch (Exception ignored) {
@@ -574,46 +898,102 @@ public class MainActivity extends Activity {
 
     private void showResults(List<Result> results, Config config) {
         StringBuilder out = new StringBuilder();
-        int best = 0;
+        int ws = 0;
+        int real = 0;
+        int fast = 0;
         for (Result r : results) {
-            if (r.ok) best++;
+            if (r.handshakeOk) ws++;
+            if (r.realOk) real++;
+            if (r.fastOk) fast++;
             out.append(r.address())
                     .append("#").append(regionName(r.region))
                     .append(" ")
                     .append(String.format(Locale.US, "%.2fms", r.tcpMs))
-                    .append(" ")
-                    .append(String.format(Locale.US, "%.2fMbps", r.speedMbps))
-                    .append(" WS").append(r.wsStatus)
-                    .append(" 成功").append(r.successes).append("次/共").append(config.repeats).append("次")
-                    .append(r.proxyipText(config))
-                    .append(r.error.isEmpty() ? "" : " 错误:" + r.error)
-                    .append("\n");
+                    .append(" TLS ").append(String.format(Locale.US, "%.2fms", r.tlsMs))
+                    .append(" ");
+            if (config.realCheck) {
+                out.append(String.format(Locale.US, "%.2fMbps", r.speedMbps))
+                        .append(" 真实").append(r.realSuccesses).append("/").append(config.repeats);
+            } else {
+                out.append("未真实测速");
+            }
+            out.append(" WS").append(r.wsStatus)
+                    .append(" 握手").append(r.wsSuccesses).append("/").append(config.repeats);
+            if (!config.proxyip.isEmpty()) out.append(" ProxyIP=").append(config.proxyip);
+            if (!r.error.isEmpty()) out.append(" 错误:").append(r.error);
+            out.append("\n");
         }
         resultText.setText(out.toString());
-        status("完成：真实可用 " + best + " / " + results.size());
+        status("完成：WS成功 " + ws + " / 真实可用 " + real + " / 高速达标 " + fast + " / 总数 " + results.size());
+        progress.setProgress(100);
+    }
+
+    private void showProxyResults(List<ProxyResult> results, Config config) {
+        proxyButtonList.removeAllViews();
+        StringBuilder out = new StringBuilder();
+        int limit = Math.min(10, results.size());
+        for (int i = 0; i < limit; i++) {
+            ProxyResult r = results.get(i);
+            String line = (i + 1) + ". " + r.address()
+                    + " 成功" + r.successes + "/" + config.repeats
+                    + " " + (r.bestMs > 0 ? String.format(Locale.US, "%.2fms", r.bestMs) : "不可连")
+                    + (r.error.isEmpty() ? "" : " " + r.error);
+            out.append(line).append("\n");
+
+            Button copy = button("复制第" + (i + 1) + "名  " + r.address(), GREEN);
+            final String value = r.address();
+            copy.setOnClickListener(v -> copyText("proxyip", value, "已复制 " + value));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(42));
+            lp.topMargin = dp(6);
+            proxyButtonList.addView(copy, lp);
+        }
+        proxyResultText.setText(out.toString());
+        status("ProxyIP 完成：共 " + results.size() + " 条，显示前 " + limit);
         progress.setProgress(100);
     }
 
     private void copyResults() {
-        List<Result> ok = new ArrayList<>();
-        for (Result r : lastResults) {
-            if (r.ok) ok.add(r);
+        List<Result> selected = new ArrayList<>();
+        for (Result r : lastResults) if (r.fastOk) selected.add(r);
+        if (selected.isEmpty()) {
+            for (Result r : lastResults) if (r.realOk) selected.add(r);
         }
-        if (ok.isEmpty()) {
+        if (selected.isEmpty()) {
+            for (Result r : lastResults) if (r.handshakeOk) selected.add(r);
+        }
+        if (selected.isEmpty()) {
             Toast.makeText(this, "没有可复制的成功结果", Toast.LENGTH_SHORT).show();
             return;
         }
         StringBuilder text = new StringBuilder();
-        for (Result r : ok) {
+        for (Result r : selected) {
             text.append(r.address())
                     .append("#").append(regionName(r.region))
                     .append(" ")
                     .append(String.format(Locale.US, "%.2fms", r.tcpMs))
                     .append("\n");
         }
+        copyText("cf-results", text.toString().trim(), "已复制 " + selected.size() + " 条");
+    }
+
+    private void copyProxyTop() {
+        if (lastProxyResults.isEmpty()) {
+            Toast.makeText(this, "没有 ProxyIP 排名可复制", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        StringBuilder text = new StringBuilder();
+        int limit = Math.min(10, lastProxyResults.size());
+        for (int i = 0; i < limit; i++) {
+            if (i > 0) text.append(",");
+            text.append(lastProxyResults.get(i).address());
+        }
+        copyText("proxyip-top10", text.toString(), "已复制前 " + limit + " 个 ProxyIP");
+    }
+
+    private void copyText(String label, String text, String toast) {
         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-        cm.setPrimaryClip(ClipData.newPlainText("cf-results", text.toString().trim()));
-        Toast.makeText(this, "已复制 " + ok.size() + " 条", Toast.LENGTH_SHORT).show();
+        cm.setPrimaryClip(ClipData.newPlainText(label, text));
+        Toast.makeText(this, toast, Toast.LENGTH_SHORT).show();
     }
 
     private String pathWithProxy(String base, String proxy) throws Exception {
@@ -762,11 +1142,24 @@ public class MainActivity extends Activity {
     private String shortError(Exception e) {
         String name = e.getClass().getSimpleName();
         if (name.toLowerCase(Locale.ROOT).contains("timeout")) return "timeout";
+        String message = e.getMessage();
+        if (message != null && message.toLowerCase(Locale.ROOT).contains("timeout")) return "timeout";
         return name;
     }
 
+    private String normalizeRegion(String region) {
+        String code = region == null ? "" : region.trim().toUpperCase(Locale.ROOT);
+        if (code.startsWith("HK") || code.contains("香港")) return "HK";
+        if (code.startsWith("SG") || code.contains("新加坡")) return "SG";
+        if (code.startsWith("JP") || code.contains("日本")) return "JP";
+        if (code.startsWith("KR") || code.contains("韩国") || code.contains("韓國")) return "KR";
+        if (code.startsWith("US") || code.contains("美国") || code.contains("美國")) return "US";
+        if (code.startsWith("TW") || code.contains("台湾") || code.contains("台灣")) return "TW";
+        return code;
+    }
+
     private String regionName(String region) {
-        String code = region == null ? "" : region.toUpperCase(Locale.ROOT);
+        String code = normalizeRegion(region);
         switch (code) {
             case "HK": return "香港";
             case "JP": return "日本";
@@ -795,6 +1188,7 @@ public class MainActivity extends Activity {
         int downloadBytes;
         double minSpeedMbps;
         boolean realCheck;
+        Set<String> regions;
     }
 
     static class Target {
@@ -807,6 +1201,10 @@ public class MainActivity extends Activity {
             this.port = port;
             this.region = region == null ? "" : region;
         }
+
+        String address() {
+            return host.contains(":") ? "[" + host + "]:" + port : host + ":" + port;
+        }
     }
 
     static class Result {
@@ -814,16 +1212,17 @@ public class MainActivity extends Activity {
         final int port;
         final String region;
         boolean tcpOk;
-        boolean wsOk;
-        boolean ok;
+        boolean handshakeOk;
+        boolean realOk;
+        boolean fastOk;
         int wsStatus;
         int httpStatus;
-        int successes;
+        int wsSuccesses;
+        int realSuccesses;
         int bytesRead;
         double tcpMs;
         double tlsMs;
         double speedMbps;
-        double successRate;
         String error = "";
 
         Result(Target target) {
@@ -842,9 +1241,22 @@ public class MainActivity extends Activity {
         String address() {
             return host.contains(":") ? "[" + host + "]:" + port : host + ":" + port;
         }
+    }
 
-        String proxyipText(Config config) {
-            return config.proxyip == null || config.proxyip.isEmpty() ? "" : " proxyip=" + config.proxyip;
+    static class ProxyResult {
+        final String host;
+        final int port;
+        int successes;
+        double bestMs;
+        String error = "";
+
+        ProxyResult(Target target) {
+            host = target.host;
+            port = target.port;
+        }
+
+        String address() {
+            return host.contains(":") ? "[" + host + "]:" + port : host + ":" + port;
         }
     }
 
