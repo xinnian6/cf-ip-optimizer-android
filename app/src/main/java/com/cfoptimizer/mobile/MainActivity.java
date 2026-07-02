@@ -8,6 +8,7 @@ import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -58,6 +59,9 @@ import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 public class MainActivity extends Activity {
     private static final String PREFS = "cf_optimizer_mobile";
     private static final int BLUE = Color.rgb(37, 99, 235);
@@ -85,6 +89,13 @@ public class MainActivity extends Activity {
     private EditText downloadMbEdit;
     private EditText minSpeedEdit;
     private EditText realUrlEdit;
+    private EditText hashPrefixEdit;
+    private EditText lineSuffixEdit;
+    private EditText textspaceUrlEdit;
+    private EditText textspaceTokenEdit;
+    private EditText textspaceNoteIdEdit;
+    private EditText textspaceTitleEdit;
+    private EditText textspaceContentEdit;
     private CheckBox realCheck;
     private CheckBox allRegionCheck;
     private CheckBox hkCheck;
@@ -97,6 +108,10 @@ public class MainActivity extends Activity {
     private Button copyButton;
     private Button proxyButton;
     private Button copyProxyTopButton;
+    private Button loadNoteButton;
+    private Button fillResultButton;
+    private Button saveNoteButton;
+    private Button shareNoteButton;
     private ProgressBar progress;
     private TextView statusText;
     private TextView resultText;
@@ -105,14 +120,25 @@ public class MainActivity extends Activity {
     private LinearLayout proxyButtonList;
 
     private volatile boolean running = false;
+    private volatile boolean textspaceRunning = false;
     private List<Result> lastResults = new ArrayList<>();
     private List<ProxyResult> lastProxyResults = new ArrayList<>();
+    private NoteDetail currentNote;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        setupWindow();
         buildUi();
+    }
+
+    private void setupWindow() {
+        getWindow().setStatusBarColor(BG);
+        getWindow().setNavigationBarColor(Color.WHITE);
+        int flags = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+        if (Build.VERSION.SDK_INT >= 26) flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+        getWindow().getDecorView().setSystemUiVisibility(flags);
     }
 
     private void buildUi() {
@@ -149,6 +175,8 @@ public class MainActivity extends Activity {
         uuidEdit = input(basicCard, "VLESS UUID（不填则只验证 WS 握手）", pref("uuid", ""), 1, false);
         proxyEdit = input(basicCard, "组合测试 ProxyIP（可留空，只支持一个）", pref("proxyip", ""), 1, false);
         realUrlEdit = input(basicCard, "真实下载 URL", pref("realUrl", "http://cachefly.cachefly.net/10mb.test"), 1, false);
+        hashPrefixEdit = input(basicCard, "复制名称前缀（放在 # 后面，可留空）", pref("hashPrefix", ""), 1, false);
+        lineSuffixEdit = input(basicCard, "复制行尾追加（放在每行最后，可留空）", pref("lineSuffix", ""), 1, false);
 
         realCheck = new CheckBox(this);
         realCheck.setText("开启真实下载测速（需要 UUID）");
@@ -214,6 +242,36 @@ public class MainActivity extends Activity {
         resultText = monoText();
         resultCard.addView(resultText);
 
+        LinearLayout publishCard = card(root, "结果发布");
+        textspaceUrlEdit = input(publishCard, "TextSpace Worker 地址", pref("textspaceUrl", ""), 1, false);
+        textspaceTokenEdit = input(publishCard, "管理员密钥", pref("textspaceToken", ""), 1, false);
+        textspaceTokenEdit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        textspaceNoteIdEdit = input(publishCard, "文本 ID（留空时读取列表第一条或新建）", pref("textspaceNoteId", ""), 1, false);
+        textspaceTitleEdit = input(publishCard, "文本标题", pref("textspaceTitle", "CF 手机优选结果"), 1, false);
+        textspaceContentEdit = input(publishCard, "文本内容（可编辑，保存后分享 URL 就会更新）", pref("textspaceContent", ""), 6, false);
+
+        LinearLayout pubRow1 = row(publishCard);
+        loadNoteButton = button("获取文本", BLUE);
+        loadNoteButton.setOnClickListener(v -> loadTextspaceNote());
+        pubRow1.addView(loadNoteButton, new LinearLayout.LayoutParams(0, dp(44), 1));
+
+        fillResultButton = button("填入结果", ORANGE);
+        fillResultButton.setOnClickListener(v -> fillTextspaceWithResults());
+        LinearLayout.LayoutParams fillLp = new LinearLayout.LayoutParams(0, dp(44), 1);
+        fillLp.leftMargin = dp(8);
+        pubRow1.addView(fillResultButton, fillLp);
+
+        LinearLayout pubRow2 = row(publishCard);
+        saveNoteButton = button("保存文本", GREEN);
+        saveNoteButton.setOnClickListener(v -> saveTextspaceNote(false));
+        pubRow2.addView(saveNoteButton, new LinearLayout.LayoutParams(0, dp(44), 1));
+
+        shareNoteButton = button("保存并分享", BLUE);
+        shareNoteButton.setOnClickListener(v -> saveTextspaceNote(true));
+        LinearLayout.LayoutParams shareLp = new LinearLayout.LayoutParams(0, dp(44), 1);
+        shareLp.leftMargin = dp(8);
+        pubRow2.addView(shareNoteButton, shareLp);
+
         LinearLayout logCard = card(root, "运行日志");
         logText = monoText();
         logCard.addView(logText);
@@ -228,6 +286,7 @@ public class MainActivity extends Activity {
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(CARD);
         bg.setCornerRadius(dp(8));
+        bg.setStroke(1, Color.rgb(226, 232, 240));
         box.setBackground(bg);
 
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
@@ -258,6 +317,7 @@ public class MainActivity extends Activity {
         edit.setTextColor(TEXT);
         edit.setSelectAllOnFocus(false);
         edit.setPadding(dp(10), dp(6), dp(10), dp(6));
+        edit.setBackground(fieldBg());
         if (number) edit.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
         root.addView(edit, fieldLp());
         return edit;
@@ -301,6 +361,7 @@ public class MainActivity extends Activity {
         edit.setTextColor(TEXT);
         edit.setGravity(Gravity.CENTER_VERTICAL);
         edit.setPadding(dp(8), 0, dp(8), 0);
+        edit.setBackground(fieldBg());
         box.addView(edit, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
         lp.rightMargin = dp(6);
@@ -311,6 +372,7 @@ public class MainActivity extends Activity {
     private Button button(String text, int color) {
         Button b = new Button(this);
         b.setText(text);
+        b.setAllCaps(false);
         b.setTextColor(Color.WHITE);
         b.setTextSize(15);
         GradientDrawable bg = new GradientDrawable();
@@ -318,6 +380,14 @@ public class MainActivity extends Activity {
         bg.setCornerRadius(dp(8));
         b.setBackground(bg);
         return b;
+    }
+
+    private GradientDrawable fieldBg() {
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(Color.rgb(248, 250, 252));
+        bg.setCornerRadius(dp(7));
+        bg.setStroke(1, Color.rgb(203, 213, 225));
+        return bg;
     }
 
     private TextView monoText() {
@@ -443,10 +513,13 @@ public class MainActivity extends Activity {
             try {
                 Config config = readConfig();
                 saveConfig();
-                List<Target> proxies = loadTargets(proxySourceEdit.getText().toString(), Collections.emptySet(), false);
+                List<Target> proxies = loadTargets(proxySourceEdit.getText().toString(), config.regions, true);
                 if (proxies.isEmpty()) {
                     toast("没有解析到 ProxyIP");
                     return;
+                }
+                if (proxies.size() > config.candidates) {
+                    proxies = evenSample(proxies, config.candidates);
                 }
                 log("解析 ProxyIP " + proxies.size() + " 条");
                 List<ProxyResult> results = runProxyTcpScan(proxies, config);
@@ -474,6 +547,8 @@ public class MainActivity extends Activity {
         c.uuid = uuidEdit.getText().toString().trim();
         c.proxyip = firstToken(proxyEdit.getText().toString().trim());
         c.realUrl = realUrlEdit.getText().toString().trim();
+        c.hashPrefix = hashPrefixEdit.getText().toString().trim();
+        c.lineSuffix = lineSuffixEdit.getText().toString().trim();
         c.timeoutMs = Math.max(500, (int) (parseDouble(timeoutEdit, 8) * 1000));
         c.concurrency = clamp((int) parseDouble(concurrencyEdit, 32), 1, 256);
         c.candidates = clamp((int) parseDouble(candidatesEdit, 100), 1, 5000);
@@ -528,6 +603,13 @@ public class MainActivity extends Activity {
                 .putString("uuid", uuidEdit.getText().toString())
                 .putString("proxyip", proxyEdit.getText().toString())
                 .putString("realUrl", realUrlEdit.getText().toString())
+                .putString("hashPrefix", hashPrefixEdit.getText().toString())
+                .putString("lineSuffix", lineSuffixEdit.getText().toString())
+                .putString("textspaceUrl", textspaceUrlEdit.getText().toString())
+                .putString("textspaceToken", textspaceTokenEdit.getText().toString())
+                .putString("textspaceNoteId", textspaceNoteIdEdit.getText().toString())
+                .putString("textspaceTitle", textspaceTitleEdit.getText().toString())
+                .putString("textspaceContent", textspaceContentEdit.getText().toString())
                 .putString("timeout", timeoutEdit.getText().toString())
                 .putString("concurrency", concurrencyEdit.getText().toString())
                 .putString("candidates", candidatesEdit.getText().toString())
@@ -823,6 +905,16 @@ public class MainActivity extends Activity {
         return targets;
     }
 
+    private List<Target> evenSample(List<Target> input, int limit) {
+        if (input.size() <= limit) return input;
+        List<Target> out = new ArrayList<>();
+        double step = input.size() / (double) limit;
+        for (int i = 0; i < limit; i++) {
+            out.add(input.get((int) Math.floor(i * step)));
+        }
+        return out;
+    }
+
     private List<Target> parseTargets(String token) {
         List<Target> out = new ArrayList<>();
         try {
@@ -953,6 +1045,16 @@ public class MainActivity extends Activity {
     }
 
     private void copyResults() {
+        String text = buildCopyResults();
+        if (text.isEmpty()) {
+            Toast.makeText(this, "没有可复制的成功结果", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        int count = text.split("\\r?\\n").length;
+        copyText("cf-results", text, "已复制 " + count + " 条");
+    }
+
+    private String buildCopyResults() {
         List<Result> selected = new ArrayList<>();
         for (Result r : lastResults) if (r.fastOk) selected.add(r);
         if (selected.isEmpty()) {
@@ -962,18 +1064,25 @@ public class MainActivity extends Activity {
             for (Result r : lastResults) if (r.handshakeOk) selected.add(r);
         }
         if (selected.isEmpty()) {
-            Toast.makeText(this, "没有可复制的成功结果", Toast.LENGTH_SHORT).show();
-            return;
+            return "";
         }
         StringBuilder text = new StringBuilder();
+        Config config = readConfig();
         for (Result r : selected) {
-            text.append(r.address())
-                    .append("#").append(regionName(r.region))
-                    .append(" ")
-                    .append(String.format(Locale.US, "%.2fms", r.tcpMs))
-                    .append("\n");
+            text.append(formatCopyLine(r, config)).append("\n");
         }
-        copyText("cf-results", text.toString().trim(), "已复制 " + selected.size() + " 条");
+        return text.toString().trim();
+    }
+
+    private String formatCopyLine(Result r, Config config) {
+        StringBuilder line = new StringBuilder();
+        line.append(r.address()).append("#");
+        if (!config.hashPrefix.isEmpty()) line.append(config.hashPrefix).append(" ");
+        line.append(regionName(r.region))
+                .append(" ")
+                .append(String.format(Locale.US, "%.2fms", r.tcpMs));
+        if (!config.lineSuffix.isEmpty()) line.append(" ").append(config.lineSuffix);
+        return line.toString().trim();
     }
 
     private void copyProxyTop() {
@@ -994,6 +1103,198 @@ public class MainActivity extends Activity {
         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         cm.setPrimaryClip(ClipData.newPlainText(label, text));
         Toast.makeText(this, toast, Toast.LENGTH_SHORT).show();
+    }
+
+    private void fillTextspaceWithResults() {
+        String text = buildCopyResults();
+        if (text.isEmpty()) {
+            Toast.makeText(this, "没有可填入的测速结果", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        textspaceContentEdit.setText(text);
+        saveConfig();
+        Toast.makeText(this, "已填入测速结果", Toast.LENGTH_SHORT).show();
+    }
+
+    private void loadTextspaceNote() {
+        if (textspaceRunning) return;
+        textspaceRunning = true;
+        setTextspaceButtons(false);
+        status("正在获取 TextSpace 文本");
+
+        new Thread(() -> {
+            try {
+                saveConfig();
+                String noteId = textspaceNoteIdEdit.getText().toString().trim();
+                NoteDetail note;
+                if (!noteId.isEmpty()) {
+                    note = parseNote(new JSONObject(textspaceRequest("GET", "/api/notes/" + urlPart(noteId), null)));
+                } else {
+                    JSONArray notes;
+                    try {
+                        notes = new JSONArray(textspaceRequest("GET", "/api/notes?full=1", null));
+                    } catch (Exception fullError) {
+                        notes = new JSONArray(textspaceRequest("GET", "/api/notes", null));
+                    }
+                    if (notes.length() == 0) {
+                        toast("TextSpace 里还没有文本");
+                        return;
+                    }
+                    String wantedTitle = textspaceTitleEdit.getText().toString().trim();
+                    JSONObject picked = notes.getJSONObject(0);
+                    if (!wantedTitle.isEmpty()) {
+                        for (int i = 0; i < notes.length(); i++) {
+                            JSONObject item = notes.getJSONObject(i);
+                            if (wantedTitle.equals(item.optString("title"))) {
+                                picked = item;
+                                break;
+                            }
+                        }
+                    }
+                    if (!picked.has("content")) {
+                        String pickedId = picked.optString("id", "");
+                        if (pickedId.isEmpty()) throw new IOException("文本列表缺少 ID");
+                        picked = new JSONObject(textspaceRequest("GET", "/api/notes/" + urlPart(pickedId), null));
+                    }
+                    note = parseNote(picked);
+                }
+                currentNote = note;
+                ui.post(() -> {
+                    textspaceNoteIdEdit.setText(note.id);
+                    textspaceTitleEdit.setText(note.title);
+                    textspaceContentEdit.setText(note.content);
+                    status("已获取文本：" + note.title);
+                });
+            } catch (Exception e) {
+                log("TextSpace 获取失败: " + e.getMessage());
+                toast("获取失败: " + e.getMessage());
+            } finally {
+                textspaceRunning = false;
+                ui.post(() -> setTextspaceButtons(true));
+            }
+        }).start();
+    }
+
+    private void saveTextspaceNote(boolean share) {
+        if (textspaceRunning) return;
+        textspaceRunning = true;
+        setTextspaceButtons(false);
+        status(share ? "正在保存并分享" : "正在保存文本");
+
+        new Thread(() -> {
+            try {
+                saveConfig();
+                String noteId = textspaceNoteIdEdit.getText().toString().trim();
+                String title = textspaceTitleEdit.getText().toString().trim();
+                String content = textspaceContentEdit.getText().toString();
+                if (title.isEmpty()) title = "CF 手机优选结果";
+
+                JSONObject body = new JSONObject();
+                body.put("title", title);
+                body.put("content", content);
+
+                JSONObject savedJson;
+                if (noteId.isEmpty()) {
+                    savedJson = new JSONObject(textspaceRequest("POST", "/api/notes", body.toString()));
+                } else {
+                    savedJson = new JSONObject(textspaceRequest("PUT", "/api/notes/" + urlPart(noteId), body.toString()));
+                }
+                currentNote = parseNote(savedJson);
+
+                String shareUrl = "";
+                if (share) {
+                    JSONObject sharedJson = new JSONObject(textspaceRequest("POST", "/api/notes/" + urlPart(currentNote.id) + "/share", "{}"));
+                    currentNote = parseNote(sharedJson);
+                    shareUrl = textspaceBaseUrl() + "/s/" + urlPart(currentNote.shareToken);
+                }
+
+                String finalTitle = title;
+                String finalShareUrl = shareUrl;
+                ui.post(() -> {
+                    textspaceNoteIdEdit.setText(currentNote.id);
+                    textspaceTitleEdit.setText(finalTitle);
+                    if (!finalShareUrl.isEmpty()) {
+                        copyText("textspace-share-url", finalShareUrl, "分享 URL 已复制");
+                    }
+                    status(share ? "已保存并复制分享 URL：" + finalShareUrl : "已保存文本：" + finalTitle);
+                });
+            } catch (Exception e) {
+                log("TextSpace 保存失败: " + e.getMessage());
+                toast("保存失败: " + e.getMessage());
+            } finally {
+                textspaceRunning = false;
+                ui.post(() -> setTextspaceButtons(true));
+            }
+        }).start();
+    }
+
+    private void setTextspaceButtons(boolean enabled) {
+        loadNoteButton.setEnabled(enabled);
+        fillResultButton.setEnabled(enabled);
+        saveNoteButton.setEnabled(enabled);
+        shareNoteButton.setEnabled(enabled);
+    }
+
+    private String textspaceRequest(String method, String path, String body) throws Exception {
+        URL url = new URL(textspaceBaseUrl() + path);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setConnectTimeout(15000);
+        conn.setReadTimeout(30000);
+        conn.setRequestMethod(method);
+        conn.setRequestProperty("Authorization", "Bearer " + textspaceToken());
+        conn.setRequestProperty("Accept", "application/json");
+        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.2");
+        if (body != null) {
+            conn.setDoOutput(true);
+            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            try (OutputStream out = conn.getOutputStream()) {
+                out.write(body.getBytes(StandardCharsets.UTF_8));
+            }
+        }
+        int code = conn.getResponseCode();
+        InputStream stream = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
+        String text = stream == null ? "" : new String(readAll(stream), StandardCharsets.UTF_8);
+        if (code < 200 || code >= 300) throw new IOException(readTextspaceError(text, code));
+        return text;
+    }
+
+    private String textspaceBaseUrl() {
+        String value = textspaceUrlEdit.getText().toString().trim();
+        while (value.endsWith("/")) value = value.substring(0, value.length() - 1);
+        if (!value.startsWith("http://") && !value.startsWith("https://")) {
+            throw new IllegalArgumentException("请填写正确的 Worker 地址");
+        }
+        return value;
+    }
+
+    private String textspaceToken() {
+        String token = textspaceTokenEdit.getText().toString().trim();
+        if (token.isEmpty()) throw new IllegalArgumentException("请填写管理员密钥");
+        return token;
+    }
+
+    private String readTextspaceError(String text, int code) {
+        try {
+            JSONObject json = new JSONObject(text);
+            String error = json.optString("error", "");
+            if (!error.isEmpty()) return error;
+        } catch (Exception ignored) {
+        }
+        return text == null || text.trim().isEmpty() ? "HTTP " + code : text;
+    }
+
+    private String urlPart(String value) throws Exception {
+        return URLEncoder.encode(value == null ? "" : value, "UTF-8").replace("+", "%20");
+    }
+
+    private NoteDetail parseNote(JSONObject json) {
+        NoteDetail note = new NoteDetail();
+        note.id = json.optString("id", "");
+        note.title = json.optString("title", "");
+        note.content = json.optString("content", "");
+        note.shareToken = json.optString("share_token", "");
+        note.updatedAt = json.optLong("updated_at", 0);
+        return note;
     }
 
     private String pathWithProxy(String base, String proxy) throws Exception {
@@ -1181,6 +1482,8 @@ public class MainActivity extends Activity {
         String uuid;
         String proxyip;
         String realUrl;
+        String hashPrefix;
+        String lineSuffix;
         int timeoutMs;
         int concurrency;
         int candidates;
@@ -1258,6 +1561,14 @@ public class MainActivity extends Activity {
         String address() {
             return host.contains(":") ? "[" + host + "]:" + port : host + ":" + port;
         }
+    }
+
+    static class NoteDetail {
+        String id = "";
+        String title = "";
+        String content = "";
+        String shareToken = "";
+        long updatedAt;
     }
 
     static class RealSpeed {
