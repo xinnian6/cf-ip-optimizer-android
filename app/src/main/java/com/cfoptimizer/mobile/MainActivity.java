@@ -172,7 +172,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("CF 手机优选 v1.16");
+        title.setText("CF 手机优选 v1.17");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(TEXT);
@@ -187,6 +187,19 @@ public class MainActivity extends Activity {
 
         LinearLayout sourceCard = card(root, "IP 数据源");
         sourceEdit = input(sourceCard, "网络地址或直接粘贴 IP 列表", pref("source", "https://zip.cm.edu.kg/all.txt"), 1, false);
+        textspaceUrlEdit = input(sourceCard, "TextSpace Worker 地址", pref("textspaceUrl", ""), 1, false);
+        textspaceTokenEdit = input(sourceCard, "管理员密钥", pref("textspaceToken", ""), 1, false);
+        textspaceTokenEdit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        textspaceTitleEdit = input(sourceCard, "文本标题", pref("textspaceTitle", "CF 手机优选结果"), 1, false);
+        View.OnFocusChangeListener autoRefreshTextspace = (view, hasFocus) -> {
+            if (!hasFocus
+                    && !textspaceUrlEdit.getText().toString().trim().isEmpty()
+                    && !textspaceTokenEdit.getText().toString().trim().isEmpty()) {
+                loadTextspaceNotes(false);
+            }
+        };
+        textspaceUrlEdit.setOnFocusChangeListener(autoRefreshTextspace);
+        textspaceTokenEdit.setOnFocusChangeListener(autoRefreshTextspace);
         addRegionFilters(sourceCard);
 
         LinearLayout basicCard = card(root, "节点参数");
@@ -230,9 +243,20 @@ public class MainActivity extends Activity {
         buttons.addView(copyButton, copyLp);
 
         LinearLayout boundButtons = row(actionCard);
+        saveResultButton = button("保存测速结果", ORANGE);
+        saveResultButton.setOnClickListener(v -> saveScanResultsToTextspace());
+        boundButtons.addView(saveResultButton, new LinearLayout.LayoutParams(0, dp(44), 1));
+
+        saveBoundNodesButton = button("保存绑定节点", BLUE);
+        saveBoundNodesButton.setOnClickListener(v -> saveBoundNodesToTextspace());
+        LinearLayout.LayoutParams saveBoundLp = new LinearLayout.LayoutParams(0, dp(44), 1);
+        saveBoundLp.leftMargin = dp(8);
+        boundButtons.addView(saveBoundNodesButton, saveBoundLp);
+
+        LinearLayout copyBoundRow = row(actionCard);
         copyBoundNodesButton = button("复制绑定节点", BLUE);
         copyBoundNodesButton.setOnClickListener(v -> copyBoundNodes());
-        boundButtons.addView(copyBoundNodesButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
+        copyBoundRow.addView(copyBoundNodesButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
 
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(100);
@@ -271,20 +295,7 @@ public class MainActivity extends Activity {
         resultCard.addView(resultText);
 
         LinearLayout publishCard = card(root, "结果发布");
-        textspaceUrlEdit = input(publishCard, "TextSpace Worker 地址", pref("textspaceUrl", ""), 1, false);
-        textspaceTokenEdit = input(publishCard, "管理员密钥", pref("textspaceToken", ""), 1, false);
-        textspaceTokenEdit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        View.OnFocusChangeListener autoRefreshTextspace = (view, hasFocus) -> {
-            if (!hasFocus
-                    && !textspaceUrlEdit.getText().toString().trim().isEmpty()
-                    && !textspaceTokenEdit.getText().toString().trim().isEmpty()) {
-                loadTextspaceNotes(false);
-            }
-        };
-        textspaceUrlEdit.setOnFocusChangeListener(autoRefreshTextspace);
-        textspaceTokenEdit.setOnFocusChangeListener(autoRefreshTextspace);
-
-        TextView noteLabel = label("文本列表（选择后自动读取）");
+        TextView noteLabel = label("保存目标（选择后自动读取）");
         publishCard.addView(noteLabel);
         LinearLayout noteRow = row(publishCard);
         textspaceNoteSpinner = new Spinner(this);
@@ -314,34 +325,21 @@ public class MainActivity extends Activity {
             }
         });
 
-        textspaceTitleEdit = input(publishCard, "文本标题", pref("textspaceTitle", "CF 手机优选结果"), 1, false);
-
         LinearLayout pubRow1 = row(publishCard);
         saveNoteButton = button("保存文本", GREEN);
         saveNoteButton.setOnClickListener(v -> saveTextspaceNote(false));
         pubRow1.addView(saveNoteButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
 
         LinearLayout pubRow2 = row(publishCard);
-        saveResultButton = button("保存测速结果", ORANGE);
-        saveResultButton.setOnClickListener(v -> saveScanResultsToTextspace());
-        pubRow2.addView(saveResultButton, new LinearLayout.LayoutParams(0, dp(44), 1));
-
-        saveBoundNodesButton = button("保存绑定节点", BLUE);
-        saveBoundNodesButton.setOnClickListener(v -> saveBoundNodesToTextspace());
-        LinearLayout.LayoutParams boundLp = new LinearLayout.LayoutParams(0, dp(44), 1);
-        boundLp.leftMargin = dp(8);
-        pubRow2.addView(saveBoundNodesButton, boundLp);
-
-        LinearLayout pubRow3 = row(publishCard);
         manageNodesButton = button("节点管理", GREEN);
         manageNodesButton.setOnClickListener(v -> showNodeManager());
-        pubRow3.addView(manageNodesButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
-        LinearLayout pubRow4 = row(publishCard);
+        pubRow2.addView(manageNodesButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
+        LinearLayout pubRow3 = row(publishCard);
         deleteNoteButton = button("删除文本", Color.rgb(220, 38, 38));
         deleteNoteButton.setOnClickListener(v -> confirmDeleteTextspaceNote());
-        pubRow4.addView(deleteNoteButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
+        pubRow3.addView(deleteNoteButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
 
-        textspaceContentEdit = input(publishCard, "文本内容（明文可编辑，一行一个节点；分享 URL 会给 v2rayN 输出订阅格式）", pref("textspaceContent", ""), 8, false);
+        textspaceContentEdit = bareInput(publishCard, pref("textspaceContent", ""), 8, false);
 
         LinearLayout logCard = card(root, "运行日志");
         logText = monoText();
@@ -388,6 +386,21 @@ public class MainActivity extends Activity {
     private EditText input(LinearLayout root, String label, String value, int minLines, boolean number) {
         TextView text = label(label);
         root.addView(text);
+        EditText edit = new EditText(this);
+        edit.setSingleLine(minLines <= 1);
+        edit.setMinLines(minLines);
+        edit.setText(value);
+        edit.setTextSize(14);
+        edit.setTextColor(TEXT);
+        edit.setSelectAllOnFocus(false);
+        edit.setPadding(dp(10), dp(6), dp(10), dp(6));
+        edit.setBackground(fieldBg());
+        if (number) edit.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        root.addView(edit, fieldLp());
+        return edit;
+    }
+
+    private EditText bareInput(LinearLayout root, String value, int minLines, boolean number) {
         EditText edit = new EditText(this);
         edit.setSingleLine(minLines <= 1);
         edit.setMinLines(minLines);
@@ -1122,7 +1135,7 @@ public class MainActivity extends Activity {
                     + "Connection: Upgrade\r\n"
                     + "Sec-WebSocket-Key: " + key + "\r\n"
                     + "Sec-WebSocket-Version: 13\r\n"
-                    + "User-Agent: CFMobileOptimizer/1.16\r\n\r\n";
+                    + "User-Agent: CFMobileOptimizer/1.17\r\n\r\n";
             out.write(request.getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
@@ -1242,7 +1255,7 @@ public class MainActivity extends Activity {
         String path = target.getFile().isEmpty() ? "/" : target.getFile();
         String request = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: " + host + "\r\n"
-                + "User-Agent: CFMobileOptimizer/1.16\r\n"
+                + "User-Agent: CFMobileOptimizer/1.17\r\n"
                 + "Accept: */*\r\n"
                 + "Connection: close\r\n\r\n";
         out.write(request.getBytes(StandardCharsets.US_ASCII));
@@ -1255,7 +1268,7 @@ public class MainActivity extends Activity {
             HttpURLConnection conn = (HttpURLConnection) new URL(text).openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
-            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.16");
+            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.17");
             try (InputStream in = conn.getInputStream()) {
                 text = new String(readAll(in), StandardCharsets.UTF_8);
             }
@@ -2184,7 +2197,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setRequestProperty("Authorization", "Bearer " + textspaceToken());
         conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.16");
+        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.17");
         if (body != null) {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
