@@ -1214,7 +1214,7 @@ public class MainActivity extends Activity {
             for (Result r : lastResults) if (r.handshakeOk) selected.add(r);
         }
         if (selected.isEmpty()) {
-            return "";
+            return selected;
         }
         selected.sort(this::compareResults);
         if (selected.size() > 10) {
