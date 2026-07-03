@@ -336,7 +336,6 @@ public class MainActivity extends Activity {
         manageNodesButton = button("节点管理", GREEN);
         manageNodesButton.setOnClickListener(v -> showNodeManager());
         pubRow3.addView(manageNodesButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
-
         LinearLayout pubRow4 = row(publishCard);
         deleteNoteButton = button("删除文本", Color.rgb(220, 38, 38));
         deleteNoteButton.setOnClickListener(v -> confirmDeleteTextspaceNote());
@@ -1587,6 +1586,244 @@ public class MainActivity extends Activity {
             saveTextspaceNote(false);
         } catch (Exception e) {
             Toast.makeText(this, e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void showNodeManager() {
+        String content = normalizeEditableSubscription(textspaceContentEdit.getText().toString());
+        textspaceContentEdit.setText(content);
+        List<NodeLine> nodes = parseNodeLines(content);
+        if (nodes.isEmpty()) {
+            Toast.makeText(this, "当前文本里没有解析到节点", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        Set<Integer> selectedLineIndexes = new LinkedHashSet<>();
+        List<Integer> visibleLineIndexes = new ArrayList<>();
+
+        LinearLayout dialogRoot = new LinearLayout(this);
+        dialogRoot.setOrientation(LinearLayout.VERTICAL);
+        dialogRoot.setPadding(dp(14), dp(8), dp(14), 0);
+
+        TextView tip = label("搜索 IP / 端口 / 地区 / ProxyIP，勾选坏节点后删除。删除只会先更新编辑框，保存后才同步到 TextSpace。");
+        dialogRoot.addView(tip);
+
+        EditText search = new EditText(this);
+        search.setSingleLine(true);
+        search.setHint("例如 219.76.13.167 或 香港");
+        search.setTextSize(14);
+        search.setPadding(dp(10), 0, dp(10), 0);
+        search.setBackground(fieldBg());
+        LinearLayout.LayoutParams searchLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44));
+        searchLp.topMargin = dp(8);
+        dialogRoot.addView(search, searchLp);
+
+        LinearLayout quickRow = new LinearLayout(this);
+        quickRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams quickLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        quickLp.topMargin = dp(8);
+        dialogRoot.addView(quickRow, quickLp);
+
+        Button selectVisibleButton = button("全选当前", BLUE);
+        quickRow.addView(selectVisibleButton, new LinearLayout.LayoutParams(0, dp(40), 1));
+
+        Button clearVisibleButton = button("取消当前", ORANGE);
+        LinearLayout.LayoutParams clearLp = new LinearLayout.LayoutParams(0, dp(40), 1);
+        clearLp.leftMargin = dp(8);
+        quickRow.addView(clearVisibleButton, clearLp);
+
+        TextView countText = label("");
+        LinearLayout.LayoutParams countLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        countLp.topMargin = dp(4);
+        dialogRoot.addView(countText, countLp);
+
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        ScrollView listScroll = new ScrollView(this);
+        listScroll.addView(list);
+        LinearLayout.LayoutParams listLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(360));
+        listLp.topMargin = dp(8);
+        dialogRoot.addView(listScroll, listLp);
+
+        Runnable render = () -> renderNodeManagerList(list, countText, nodes, selectedLineIndexes, visibleLineIndexes, search.getText().toString());
+        render.run();
+
+        search.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                render.run();
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+
+        selectVisibleButton.setOnClickListener(v -> {
+            selectedLineIndexes.addAll(visibleLineIndexes);
+            render.run();
+        });
+
+        clearVisibleButton.setOnClickListener(v -> {
+            for (Integer index : visibleLineIndexes) selectedLineIndexes.remove(index);
+            render.run();
+        });
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("节点管理")
+                .setView(dialogRoot)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("删除勾选", null)
+                .create();
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            if (selectedLineIndexes.isEmpty()) {
+                Toast.makeText(this, "还没有勾选要删除的节点", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            String next = removeNodeLines(content, selectedLineIndexes);
+            textspaceContentEdit.setText(next);
+            Toast.makeText(this, "已删除 " + selectedLineIndexes.size() + " 个节点，保存后生效", Toast.LENGTH_SHORT).show();
+            dialog.dismiss();
+        }));
+        dialog.show();
+    }
+
+    private void renderNodeManagerList(LinearLayout list, TextView countText, List<NodeLine> nodes,
+                                       Set<Integer> selectedLineIndexes, List<Integer> visibleLineIndexes, String query) {
+        list.removeAllViews();
+        visibleLineIndexes.clear();
+        String q = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+        int shown = 0;
+        for (NodeLine node : nodes) {
+            if (!q.isEmpty() && !node.searchText.contains(q)) continue;
+            visibleLineIndexes.add(node.lineIndex);
+
+            CheckBox cb = new CheckBox(this);
+            cb.setText(node.display);
+            cb.setTextSize(13);
+            cb.setTextColor(TEXT);
+            cb.setChecked(selectedLineIndexes.contains(node.lineIndex));
+            cb.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                if (isChecked) selectedLineIndexes.add(node.lineIndex);
+                else selectedLineIndexes.remove(node.lineIndex);
+                countText.setText("显示 " + visibleLineIndexes.size() + " / 总 " + nodes.size() + "，已勾选 " + selectedLineIndexes.size());
+            });
+            list.addView(cb, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            shown++;
+        }
+        if (shown == 0) {
+            TextView empty = label("没有匹配节点。");
+            list.addView(empty);
+        }
+        countText.setText("显示 " + shown + " / 总 " + nodes.size() + "，已勾选 " + selectedLineIndexes.size());
+    }
+
+    private List<NodeLine> parseNodeLines(String content) {
+        List<NodeLine> nodes = new ArrayList<>();
+        if (content == null || content.trim().isEmpty()) return nodes;
+        String[] lines = content.split("\\r?\\n", -1);
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i].trim();
+            if (line.isEmpty()) continue;
+            NodeLine node = parseNodeLine(i, line);
+            if (node != null) nodes.add(node);
+        }
+        return nodes;
+    }
+
+    private NodeLine parseNodeLine(int lineIndex, String line) {
+        String lower = line.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("vless://") || lower.startsWith("trojan://") || lower.startsWith("ss://") || lower.startsWith("vmess://")) {
+            return parseUrlNodeLine(lineIndex, line);
+        }
+        String address = firstAddress(line);
+        if (address.isEmpty()) return null;
+        String remark = "";
+        int hash = line.indexOf('#');
+        if (hash >= 0 && hash + 1 < line.length()) remark = line.substring(hash + 1).trim();
+        String region = regionName(remark);
+        String display = address + "  " + (remark.isEmpty() ? region : remark);
+        return new NodeLine(lineIndex, line, address, region, "", remark, display);
+    }
+
+    private NodeLine parseUrlNodeLine(int lineIndex, String line) {
+        String address = "";
+        String remark = "";
+        String proxy = "";
+
+        int scheme = line.indexOf("://");
+        if (scheme >= 0) {
+            String rest = line.substring(scheme + 3);
+            int end = firstIndexOf(rest, '?', '#');
+            String authority = end >= 0 ? rest.substring(0, end) : rest;
+            int at = authority.lastIndexOf('@');
+            address = at >= 0 ? authority.substring(at + 1) : authority;
+        }
+
+        int hash = line.indexOf('#');
+        if (hash >= 0 && hash + 1 < line.length()) remark = urlDecodeSafe(line.substring(hash + 1));
+
+        String decodedLine = urlDecodeSafe(line);
+        int proxyIndex = decodedLine.toLowerCase(Locale.ROOT).indexOf("proxyip=");
+        if (proxyIndex >= 0) {
+            int start = proxyIndex + "proxyip=".length();
+            int end = decodedLine.length();
+            for (char stop : new char[]{'&', '?', '#', '/', ' '}) {
+                int p = decodedLine.indexOf(stop, start);
+                if (p >= 0 && p < end) end = p;
+            }
+            proxy = decodedLine.substring(start, end).trim();
+        }
+
+        if (address.isEmpty()) address = firstAddress(decodedLine);
+        if (address.isEmpty()) return null;
+
+        String region = regionName(remark);
+        String latency = firstMatch(remark, "\\d+(?:\\.\\d+)?ms");
+        StringBuilder display = new StringBuilder();
+        display.append(address);
+        if (!region.equals("未知")) display.append("  ").append(region);
+        if (!latency.isEmpty()) display.append("  ").append(latency);
+        if (!proxy.isEmpty()) display.append("  PX ").append(proxy);
+        if (region.equals("未知") && latency.isEmpty() && proxy.isEmpty() && !remark.isEmpty()) {
+            display.append("  ").append(remark);
+        }
+        return new NodeLine(lineIndex, line, address, region, proxy, remark, display.toString());
+    }
+
+    private String removeNodeLines(String content, Set<Integer> selectedLineIndexes) {
+        String[] lines = content == null ? new String[0] : content.split("\\r?\\n", -1);
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < lines.length; i++) {
+            if (selectedLineIndexes.contains(i)) continue;
+            String line = lines[i].trim();
+            if (line.isEmpty()) continue;
+            out.append(line).append("\n");
+        }
+        return out.toString().trim();
+    }
+
+    private String firstAddress(String text) {
+        Matcher matcher = Pattern.compile("(\\[[0-9A-Fa-f:.]+\\]:\\d{2,5}|(?:\\d{1,3}\\.){3}\\d{1,3}:\\d{2,5}|[A-Za-z0-9.-]+:\\d{2,5})").matcher(text);
+        return matcher.find() ? matcher.group(1) : "";
+    }
+
+    private String firstMatch(String text, String regex) {
+        if (text == null) return "";
+        Matcher matcher = Pattern.compile(regex, Pattern.CASE_INSENSITIVE).matcher(text);
+        return matcher.find() ? matcher.group() : "";
+    }
+
+    private int firstIndexOf(String text, char a, char b) {
+        int ia = text.indexOf(a);
+        int ib = text.indexOf(b);
+        if (ia < 0) return ib;
+        if (ib < 0) return ia;
+        return Math.min(ia, ib);
+    }
+
+    private String urlDecodeSafe(String value) {
+        try {
+            return URLDecoder.decode(value, StandardCharsets.UTF_8.name());
+        } catch (Exception e) {
+            return value == null ? "" : value;
         }
     }
 
