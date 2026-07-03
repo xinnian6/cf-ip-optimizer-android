@@ -11,6 +11,7 @@
 - TLS/SNI + WebSocket `101` 握手验证
 - VLESS over WebSocket 真实 HTTP 下载测速
 - `proxyip=` 组合测试，当前只支持 1 个 ProxyIP
+- 生成 Edgetunnel 绑定节点：把当前优选 IP 固定到当前 ProxyIP，输出完整 `vless://` 链接
 - 一键复制成功结果：
 
 ```text

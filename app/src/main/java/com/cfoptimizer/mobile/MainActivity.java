@@ -118,10 +118,12 @@ public class MainActivity extends Activity {
     private CheckBox twCheck;
     private Button startButton;
     private Button copyButton;
+    private Button copyBoundNodesButton;
     private Button proxyButton;
     private Button copyProxyTopButton;
     private Button refreshNotesButton;
     private Button saveResultButton;
+    private Button saveBoundNodesButton;
     private Button saveNoteButton;
     private Button shareNoteButton;
     private Button deleteNoteButton;
@@ -167,7 +169,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("CF 手机优选 v1.7");
+        title.setText("CF 手机优选 v1.8");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(TEXT);
@@ -223,6 +225,11 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams copyLp = new LinearLayout.LayoutParams(0, dp(46), 1);
         copyLp.leftMargin = dp(8);
         buttons.addView(copyButton, copyLp);
+
+        LinearLayout boundButtons = row(actionCard);
+        copyBoundNodesButton = button("复制绑定节点", BLUE);
+        copyBoundNodesButton.setOnClickListener(v -> copyBoundNodes());
+        boundButtons.addView(copyBoundNodesButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
 
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(100);
@@ -323,6 +330,11 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams deleteLp = new LinearLayout.LayoutParams(0, dp(44), 1);
         deleteLp.leftMargin = dp(8);
         pubRow2.addView(deleteNoteButton, deleteLp);
+
+        LinearLayout pubRow3 = row(publishCard);
+        saveBoundNodesButton = button("保存绑定节点", BLUE);
+        saveBoundNodesButton.setOnClickListener(v -> saveBoundNodesToTextspace());
+        pubRow3.addView(saveBoundNodesButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
 
         LinearLayout logCard = card(root, "运行日志");
         logText = monoText();
@@ -870,7 +882,7 @@ public class MainActivity extends Activity {
                     + "Connection: Upgrade\r\n"
                     + "Sec-WebSocket-Key: " + key + "\r\n"
                     + "Sec-WebSocket-Version: 13\r\n"
-                    + "User-Agent: CFMobileOptimizer/1.7\r\n\r\n";
+                    + "User-Agent: CFMobileOptimizer/1.8\r\n\r\n";
             out.write(request.getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
@@ -990,7 +1002,7 @@ public class MainActivity extends Activity {
         String path = target.getFile().isEmpty() ? "/" : target.getFile();
         String request = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: " + host + "\r\n"
-                + "User-Agent: CFMobileOptimizer/1.7\r\n"
+                + "User-Agent: CFMobileOptimizer/1.8\r\n"
                 + "Accept: */*\r\n"
                 + "Connection: close\r\n\r\n";
         out.write(request.getBytes(StandardCharsets.US_ASCII));
@@ -1003,7 +1015,7 @@ public class MainActivity extends Activity {
             HttpURLConnection conn = (HttpURLConnection) new URL(text).openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
-            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.7");
+            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.8");
             try (InputStream in = conn.getInputStream()) {
                 text = new String(readAll(in), StandardCharsets.UTF_8);
             }
@@ -1180,6 +1192,19 @@ public class MainActivity extends Activity {
     }
 
     private String buildCopyResults() {
+        List<Result> selected = selectedTopResults();
+        if (selected.isEmpty()) {
+            return "";
+        }
+        StringBuilder text = new StringBuilder();
+        Config config = readConfig();
+        for (Result r : selected) {
+            text.append(formatCopyLine(r, config)).append("\n");
+        }
+        return text.toString().trim();
+    }
+
+    private List<Result> selectedTopResults() {
         List<Result> selected = new ArrayList<>();
         for (Result r : lastResults) if (r.fastOk) selected.add(r);
         if (selected.isEmpty()) {
@@ -1195,12 +1220,7 @@ public class MainActivity extends Activity {
         if (selected.size() > 10) {
             selected = new ArrayList<>(selected.subList(0, 10));
         }
-        StringBuilder text = new StringBuilder();
-        Config config = readConfig();
-        for (Result r : selected) {
-            text.append(formatCopyLine(r, config)).append("\n");
-        }
-        return text.toString().trim();
+        return selected;
     }
 
     private String formatCopyLine(Result r, Config config) {
@@ -1228,6 +1248,59 @@ public class MainActivity extends Activity {
         copyText("proxyip-top10", text.toString(), "已复制前 " + limit + " 个 ProxyIP");
     }
 
+    private void copyBoundNodes() {
+        try {
+            String text = buildEdgetunnelBoundNodes();
+            if (text.isEmpty()) {
+                Toast.makeText(this, "没有可复制的绑定节点", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            int count = text.split("\\r?\\n").length;
+            copyText("edgetunnel-bound-nodes", text, "已复制 " + count + " 个绑定节点");
+        } catch (Exception e) {
+            Toast.makeText(this, e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private String buildEdgetunnelBoundNodes() throws Exception {
+        Config config = readConfig();
+        if (config.uuid.isEmpty()) throw new IllegalArgumentException("请先填写 VLESS UUID");
+        if (config.proxyip.isEmpty()) throw new IllegalArgumentException("请先填写要绑定的 ProxyIP");
+        List<Result> selected = selectedTopResults();
+        if (selected.isEmpty()) return "";
+
+        StringBuilder text = new StringBuilder();
+        for (Result r : selected) {
+            text.append(formatEdgetunnelBoundNode(r, config)).append("\n");
+        }
+        return text.toString().trim();
+    }
+
+    private String formatEdgetunnelBoundNode(Result r, Config config) throws Exception {
+        String path = boundProxyPath(config.path, config.proxyip);
+        String remark = regionName(r.region)
+                + " " + String.format(Locale.US, "%.2fms", r.tcpMs)
+                + " PX " + config.proxyip;
+        String query = "encryption=none"
+                + "&security=tls"
+                + "&type=ws"
+                + "&host=" + urlPart(config.host)
+                + "&path=" + urlPart(path)
+                + "&sni=" + urlPart(config.host)
+                + "&fp=randomized";
+        return "vless://" + config.uuid + "@" + r.address() + "?" + query + "#" + urlPart(remark);
+    }
+
+    private String boundProxyPath(String base, String proxy) {
+        String path = base == null || base.trim().isEmpty() ? "/" : base.trim();
+        if (!path.startsWith("/")) path = "/" + path;
+        String cleanProxy = proxy == null ? "" : proxy.trim();
+        if (cleanProxy.isEmpty()) return path;
+        if (path.contains("?")) return path + "&proxyip=" + cleanProxy;
+        if (path.equals("/")) return "/proxyip=" + cleanProxy;
+        return path.replaceAll("/+$", "") + "/proxyip=" + cleanProxy;
+    }
+
     private void copyText(String label, String text, String toast) {
         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         cm.setPrimaryClip(ClipData.newPlainText(label, text));
@@ -1242,6 +1315,37 @@ public class MainActivity extends Activity {
         }
         textspaceContentEdit.setText(text);
         saveTextspaceNote(false);
+    }
+
+    private void saveBoundNodesToTextspace() {
+        try {
+            String text = buildEdgetunnelBoundNodes();
+            if (text.isEmpty()) {
+                Toast.makeText(this, "没有可保存的绑定节点", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            if (textspaceTitleEdit.getText().toString().trim().isEmpty()) {
+                textspaceTitleEdit.setText("Edgetunnel 绑定节点");
+            }
+            textspaceContentEdit.setText(mergeLines(textspaceContentEdit.getText().toString(), text));
+            saveTextspaceNote(false);
+        } catch (Exception e) {
+            Toast.makeText(this, e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private String mergeLines(String existing, String added) {
+        LinkedHashSet<String> lines = new LinkedHashSet<>();
+        for (String block : new String[]{existing, added}) {
+            if (block == null) continue;
+            for (String raw : block.split("\\r?\\n")) {
+                String line = raw.trim();
+                if (!line.isEmpty()) lines.add(line);
+            }
+        }
+        StringBuilder out = new StringBuilder();
+        for (String line : lines) out.append(line).append("\n");
+        return out.toString().trim();
     }
 
     private void loadTextspaceNotes(boolean showToast) {
@@ -1437,6 +1541,7 @@ public class MainActivity extends Activity {
     private void setTextspaceButtons(boolean enabled) {
         refreshNotesButton.setEnabled(enabled);
         saveResultButton.setEnabled(enabled);
+        saveBoundNodesButton.setEnabled(enabled);
         saveNoteButton.setEnabled(enabled);
         shareNoteButton.setEnabled(enabled);
         deleteNoteButton.setEnabled(enabled);
@@ -1519,7 +1624,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setRequestProperty("Authorization", "Bearer " + textspaceToken());
         conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.7");
+        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.8");
         if (body != null) {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
