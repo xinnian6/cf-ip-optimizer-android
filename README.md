@@ -95,6 +95,7 @@ git push -u origin main
 下载MiB：2
 最低Mbps：80
 真实节点测速：勾选
+真实下载URL：http://speedtest.tele2.net/10MB.zip
 ```
 
 判断结果时只看成功项：
