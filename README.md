@@ -74,6 +74,8 @@ git push -u origin main
 
 以后每次改了代码 `git push`，云端都会自动重新出一版新的 APK。也可以在 Actions 页面点 **Run workflow** 手动触发。
 
+如果手机提示“签名不一致”“版本不兼容”或要求先卸载旧版，这是因为旧 APK 使用过临时 debug 签名。从 v1.5 开始 GitHub Actions 会缓存固定 debug 签名：这次先卸载旧版再安装一次，之后同一个仓库打出来的新 APK 就可以直接覆盖安装。
+
 ## 备选方法：本地 Android Studio 打包
 
 如果你愿意在电脑装环境，也可以本地打包：
@@ -93,6 +95,7 @@ git push -u origin main
 下载MiB：2
 最低Mbps：80
 真实节点测速：勾选
+真实下载URL：http://speedtest.tele2.net/10MB.zip
 ```
 
 判断结果时只看成功项：
