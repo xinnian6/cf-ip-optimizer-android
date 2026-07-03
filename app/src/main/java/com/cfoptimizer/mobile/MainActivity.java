@@ -115,11 +115,8 @@ public class MainActivity extends Activity {
     private CheckBox realCheck;
     private CheckBox allRegionCheck;
     private Button startButton;
-    private Button copyButton;
-    private Button copyBoundNodesButton;
     private Button proxyButton;
     private Button copyProxyTopButton;
-    private Button refreshNotesButton;
     private Button saveResultButton;
     private Button saveBoundNodesButton;
     private Button saveNoteButton;
@@ -172,7 +169,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("CF 手机优选 v1.17");
+        title.setText("CF 手机优选 v1.18");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(TEXT);
@@ -234,13 +231,7 @@ public class MainActivity extends Activity {
         LinearLayout buttons = row(actionCard);
         startButton = button("开始测速", BLUE);
         startButton.setOnClickListener(v -> startScan());
-        buttons.addView(startButton, new LinearLayout.LayoutParams(0, dp(46), 1));
-
-        copyButton = button("复制测速结果", GREEN);
-        copyButton.setOnClickListener(v -> copyResults());
-        LinearLayout.LayoutParams copyLp = new LinearLayout.LayoutParams(0, dp(46), 1);
-        copyLp.leftMargin = dp(8);
-        buttons.addView(copyButton, copyLp);
+        buttons.addView(startButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(46)));
 
         LinearLayout boundButtons = row(actionCard);
         saveResultButton = button("保存测速结果", ORANGE);
@@ -252,11 +243,6 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams saveBoundLp = new LinearLayout.LayoutParams(0, dp(44), 1);
         saveBoundLp.leftMargin = dp(8);
         boundButtons.addView(saveBoundNodesButton, saveBoundLp);
-
-        LinearLayout copyBoundRow = row(actionCard);
-        copyBoundNodesButton = button("复制绑定节点", BLUE);
-        copyBoundNodesButton.setOnClickListener(v -> copyBoundNodes());
-        copyBoundRow.addView(copyBoundNodesButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
 
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(100);
@@ -301,11 +287,6 @@ public class MainActivity extends Activity {
         textspaceNoteSpinner = new Spinner(this);
         textspaceNoteSpinner.setBackground(fieldBg());
         noteRow.addView(textspaceNoteSpinner, new LinearLayout.LayoutParams(0, dp(44), 1));
-        refreshNotesButton = button("刷新", BLUE);
-        refreshNotesButton.setOnClickListener(v -> loadTextspaceNotes(true));
-        LinearLayout.LayoutParams refreshLp = new LinearLayout.LayoutParams(dp(66), dp(44));
-        refreshLp.leftMargin = dp(8);
-        noteRow.addView(refreshNotesButton, refreshLp);
         shareNoteButton = button("分享", GREEN);
         shareNoteButton.setOnClickListener(v -> saveTextspaceNote(true));
         LinearLayout.LayoutParams shareTopLp = new LinearLayout.LayoutParams(dp(66), dp(44));
@@ -340,6 +321,7 @@ public class MainActivity extends Activity {
         pubRow3.addView(deleteNoteButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
 
         textspaceContentEdit = bareInput(publishCard, pref("textspaceContent", ""), 8, false);
+        textspaceContentEdit.setVisibility(View.GONE);
 
         LinearLayout logCard = card(root, "运行日志");
         logText = monoText();
@@ -1135,7 +1117,7 @@ public class MainActivity extends Activity {
                     + "Connection: Upgrade\r\n"
                     + "Sec-WebSocket-Key: " + key + "\r\n"
                     + "Sec-WebSocket-Version: 13\r\n"
-                    + "User-Agent: CFMobileOptimizer/1.17\r\n\r\n";
+                    + "User-Agent: CFMobileOptimizer/1.18\r\n\r\n";
             out.write(request.getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
@@ -1255,7 +1237,7 @@ public class MainActivity extends Activity {
         String path = target.getFile().isEmpty() ? "/" : target.getFile();
         String request = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: " + host + "\r\n"
-                + "User-Agent: CFMobileOptimizer/1.17\r\n"
+                + "User-Agent: CFMobileOptimizer/1.18\r\n"
                 + "Accept: */*\r\n"
                 + "Connection: close\r\n\r\n";
         out.write(request.getBytes(StandardCharsets.US_ASCII));
@@ -1268,7 +1250,7 @@ public class MainActivity extends Activity {
             HttpURLConnection conn = (HttpURLConnection) new URL(text).openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
-            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.17");
+            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.18");
             try (InputStream in = conn.getInputStream()) {
                 text = new String(readAll(in), StandardCharsets.UTF_8);
             }
@@ -2111,7 +2093,6 @@ public class MainActivity extends Activity {
     }
 
     private void setTextspaceButtons(boolean enabled) {
-        refreshNotesButton.setEnabled(enabled);
         saveResultButton.setEnabled(enabled);
         saveBoundNodesButton.setEnabled(enabled);
         saveNoteButton.setEnabled(enabled);
@@ -2197,7 +2178,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setRequestProperty("Authorization", "Bearer " + textspaceToken());
         conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.17");
+        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.18");
         if (body != null) {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
