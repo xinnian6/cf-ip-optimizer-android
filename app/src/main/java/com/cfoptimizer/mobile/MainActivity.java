@@ -882,7 +882,7 @@ public class MainActivity extends Activity {
                     + "Connection: Upgrade\r\n"
                     + "Sec-WebSocket-Key: " + key + "\r\n"
                     + "Sec-WebSocket-Version: 13\r\n"
-                    + "User-Agent: CFMobileOptimizer/1.8\r\n\r\n";
+                    + "User-Agent: CFMobileOptimizer/1.9\r\n\r\n";
             out.write(request.getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
@@ -1002,7 +1002,7 @@ public class MainActivity extends Activity {
         String path = target.getFile().isEmpty() ? "/" : target.getFile();
         String request = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: " + host + "\r\n"
-                + "User-Agent: CFMobileOptimizer/1.8\r\n"
+                + "User-Agent: CFMobileOptimizer/1.9\r\n"
                 + "Accept: */*\r\n"
                 + "Connection: close\r\n\r\n";
         out.write(request.getBytes(StandardCharsets.US_ASCII));
@@ -1015,7 +1015,7 @@ public class MainActivity extends Activity {
             HttpURLConnection conn = (HttpURLConnection) new URL(text).openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
-            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.8");
+            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.9");
             try (InputStream in = conn.getInputStream()) {
                 text = new String(readAll(in), StandardCharsets.UTF_8);
             }
@@ -1287,7 +1287,7 @@ public class MainActivity extends Activity {
                 + "&host=" + urlPart(config.host)
                 + "&path=" + urlPart(path)
                 + "&sni=" + urlPart(config.host)
-                + "&fp=randomized";
+                + "&fp=chrome";
         return "vless://" + config.uuid + "@" + r.address() + "?" + query + "#" + urlPart(remark);
     }
 
@@ -1328,7 +1328,7 @@ public class MainActivity extends Activity {
                 textspaceTitleEdit.setText("Edgetunnel 绑定节点");
             }
             textspaceContentEdit.setText(mergeLines(textspaceContentEdit.getText().toString(), text));
-            saveTextspaceNote(false);
+            saveTextspaceNote(true);
         } catch (Exception e) {
             Toast.makeText(this, e.getMessage(), Toast.LENGTH_SHORT).show();
         }
@@ -1466,7 +1466,7 @@ public class MainActivity extends Activity {
                 if (share) {
                     JSONObject sharedJson = new JSONObject(textspaceRequest("POST", "/api/notes/" + urlPart(currentNote.id) + "/share", "{}"));
                     currentNote = parseNote(sharedJson);
-                    shareUrl = textspaceBaseUrl() + "/s/" + urlPart(currentNote.shareToken);
+                    shareUrl = textspaceBaseUrl() + "/sub/" + urlPart(currentNote.shareToken);
                 }
 
                 String finalTitle = title;
@@ -1624,7 +1624,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setRequestProperty("Authorization", "Bearer " + textspaceToken());
         conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.8");
+        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.9");
         if (body != null) {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
