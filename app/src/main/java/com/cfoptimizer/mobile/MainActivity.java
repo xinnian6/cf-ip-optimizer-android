@@ -113,7 +113,6 @@ public class MainActivity extends Activity {
     private CheckBox allRegionCheck;
     private Button startButton;
     private Button proxyButton;
-    private Button copyProxyTopButton;
     private Button saveResultButton;
     private Button saveBoundNodesButton;
     private Button shareNoteButton;
@@ -121,7 +120,6 @@ public class MainActivity extends Activity {
     private ProgressBar progress;
     private TextView statusText;
     private TextView resultText;
-    private TextView proxyResultText;
     private TextView logText;
     private TextView regionSummaryText;
     private LinearLayout proxyButtonList;
@@ -164,14 +162,14 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("CF 手机优选 v1.20");
+        title.setText("CF 手机优选 v1.21");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(TEXT);
         root.addView(title);
 
         TextView sub = new TextView(this);
-        sub.setText("按地区筛选 IP，验证 WS 握手和真实下载，也可以单独测试 ProxyIP。");
+        sub.setText("按地区筛选 IP，验证 WS 握手和真实下载，也可以单独测速 ProxyIP。");
         sub.setTextSize(13);
         sub.setTextColor(MUTED);
         sub.setPadding(0, dp(3), 0, dp(10));
@@ -179,6 +177,7 @@ public class MainActivity extends Activity {
 
         LinearLayout sourceCard = card(root, "IP 数据源");
         sourceEdit = input(sourceCard, "网络地址或直接粘贴 IP 列表", pref("source", "https://zip.cm.edu.kg/all.txt"), 1, false);
+        proxySourceEdit = input(sourceCard, "ProxyIP 数据源（网络地址或直接粘贴列表）", pref("proxySource", ""), 1, false);
         textspaceUrlEdit = input(sourceCard, "TextSpace Worker 地址", pref("textspaceUrl", ""), 1, false);
         textspaceTokenEdit = input(sourceCard, "管理员密钥", pref("textspaceToken", ""), 1, false);
         textspaceTokenEdit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
@@ -194,31 +193,11 @@ public class MainActivity extends Activity {
         textspaceTokenEdit.setOnFocusChangeListener(autoRefreshTextspace);
         addRegionFilters(sourceCard);
 
-        LinearLayout proxyCard = card(root, "ProxyIP 稳定性");
-        proxySourceEdit = input(proxyCard, "ProxyIP 数据源（网络地址或直接粘贴列表）", pref("proxySource", ""), 1, false);
-        LinearLayout proxyButtons = row(proxyCard);
-        proxyButton = button("测试 ProxyIP", ORANGE);
-        proxyButton.setOnClickListener(v -> startProxyTest());
-        proxyButtons.addView(proxyButton, new LinearLayout.LayoutParams(0, dp(46), 1));
-
-        copyProxyTopButton = button("复制前十", GREEN);
-        copyProxyTopButton.setOnClickListener(v -> copyProxyTop());
-        LinearLayout.LayoutParams proxyCopyLp = new LinearLayout.LayoutParams(0, dp(46), 1);
-        proxyCopyLp.leftMargin = dp(8);
-        proxyButtons.addView(copyProxyTopButton, proxyCopyLp);
-
-        proxyButtonList = new LinearLayout(this);
-        proxyButtonList.setOrientation(LinearLayout.VERTICAL);
-        proxyCard.addView(proxyButtonList);
-
-        proxyResultText = monoText();
-        proxyCard.addView(proxyResultText);
-
         LinearLayout basicCard = card(root, "节点参数");
         hostEdit = input(basicCard, "SNI / Host 域名", pref("host", "xinnian.us.ci"), 1, false);
         pathEdit = input(basicCard, "WS 路径", pref("path", "/"), 1, false);
         uuidEdit = input(basicCard, "VLESS UUID（不填则只验证 WS 握手）", pref("uuid", ""), 1, false);
-        proxyEdit = input(basicCard, "组合测试 ProxyIP（可留空，只支持一个）", pref("proxyip", ""), 1, false);
+        proxyEdit = input(basicCard, "组合测速 ProxyIP（可留空，只支持一个）", pref("proxyip", ""), 1, false);
         realUrlEdit = input(basicCard, "真实下载 URL", prefRealUrl(), 1, false);
 
         LinearLayout paramCard = card(root, "测速参数");
@@ -266,6 +245,12 @@ public class MainActivity extends Activity {
         startButton.setOnClickListener(v -> startScan());
         buttons.addView(startButton, new LinearLayout.LayoutParams(0, dp(44), 1));
 
+        proxyButton = button("测速ProxyIP", ORANGE);
+        proxyButton.setOnClickListener(v -> startProxyTest());
+        LinearLayout.LayoutParams proxyLp = new LinearLayout.LayoutParams(0, dp(44), 1);
+        proxyLp.leftMargin = dp(8);
+        buttons.addView(proxyButton, proxyLp);
+
         manageNodesButton = button("节点管理", GREEN);
         manageNodesButton.setOnClickListener(v -> showNodeManager());
         LinearLayout.LayoutParams manageLp = new LinearLayout.LayoutParams(0, dp(44), 1);
@@ -296,6 +281,10 @@ public class MainActivity extends Activity {
         actionCard.addView(statusText);
 
         LinearLayout resultCard = card(root, "测速结果");
+        proxyButtonList = new LinearLayout(this);
+        proxyButtonList.setOrientation(LinearLayout.VERTICAL);
+        resultCard.addView(proxyButtonList);
+
         resultText = monoText();
         resultCard.addView(resultText);
 
@@ -753,6 +742,7 @@ public class MainActivity extends Activity {
         running = true;
         startButton.setEnabled(false);
         resultText.setText("");
+        proxyButtonList.removeAllViews();
         logText.setText("");
         lastResults = new ArrayList<>();
         progress.setProgress(0);
@@ -807,11 +797,11 @@ public class MainActivity extends Activity {
         if (running) return;
         running = true;
         proxyButton.setEnabled(false);
-        proxyResultText.setText("");
+        resultText.setText("");
         proxyButtonList.removeAllViews();
         lastProxyResults = new ArrayList<>();
         progress.setProgress(0);
-        status("正在测试 ProxyIP");
+        status("正在测速 ProxyIP");
         int runId = beginProgressRun();
 
         new Thread(() -> {
@@ -838,7 +828,7 @@ public class MainActivity extends Activity {
                 ui.post(() -> showProxyResults(results, config));
             } catch (Exception e) {
                 log("ProxyIP 错误: " + e.getMessage());
-                toast("ProxyIP 测试失败: " + e.getMessage());
+                toast("ProxyIP 测速失败: " + e.getMessage());
             } finally {
                 running = false;
                 ui.post(() -> proxyButton.setEnabled(true));
@@ -1091,7 +1081,7 @@ public class MainActivity extends Activity {
                     + "Connection: Upgrade\r\n"
                     + "Sec-WebSocket-Key: " + key + "\r\n"
                     + "Sec-WebSocket-Version: 13\r\n"
-                    + "User-Agent: CFMobileOptimizer/1.20\r\n\r\n";
+                    + "User-Agent: CFMobileOptimizer/1.21\r\n\r\n";
             out.write(request.getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
@@ -1211,7 +1201,7 @@ public class MainActivity extends Activity {
         String path = target.getFile().isEmpty() ? "/" : target.getFile();
         String request = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: " + host + "\r\n"
-                + "User-Agent: CFMobileOptimizer/1.20\r\n"
+                + "User-Agent: CFMobileOptimizer/1.21\r\n"
                 + "Accept: */*\r\n"
                 + "Connection: close\r\n\r\n";
         out.write(request.getBytes(StandardCharsets.US_ASCII));
@@ -1224,7 +1214,7 @@ public class MainActivity extends Activity {
             HttpURLConnection conn = (HttpURLConnection) new URL(text).openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
-            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.20");
+            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.21");
             try (InputStream in = conn.getInputStream()) {
                 text = new String(readAll(in), StandardCharsets.UTF_8);
             }
@@ -1333,6 +1323,7 @@ public class MainActivity extends Activity {
     }
 
     private void showResults(List<Result> results, Config config) {
+        proxyButtonList.removeAllViews();
         StringBuilder out = new StringBuilder();
         int ws = 0;
         int real = 0;
@@ -1378,14 +1369,15 @@ public class MainActivity extends Activity {
                     + (r.error.isEmpty() ? "" : " " + r.error);
             out.append(line).append("\n");
 
-            Button copy = button("复制第" + (i + 1) + "名  " + r.address(), GREEN);
+            String copyLabel = i == 0 ? "复制第一名  " : "复制第" + (i + 1) + "名  ";
+            Button copy = button(copyLabel + r.address(), GREEN);
             final String value = r.address();
             copy.setOnClickListener(v -> copyText("proxyip", value, "已复制 " + value));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(42));
             lp.topMargin = dp(6);
             proxyButtonList.addView(copy, lp);
         }
-        proxyResultText.setText(out.toString());
+        resultText.setText(out.toString());
         status("ProxyIP 完成：共 " + results.size() + " 条，显示前 " + limit);
         progress.setProgress(100);
     }
@@ -1438,20 +1430,6 @@ public class MainActivity extends Activity {
                 .append(" ")
                 .append(String.format(Locale.US, "%.2fms", r.tcpMs));
         return line.toString().trim();
-    }
-
-    private void copyProxyTop() {
-        if (lastProxyResults.isEmpty()) {
-            Toast.makeText(this, "没有 ProxyIP 排名可复制", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        StringBuilder text = new StringBuilder();
-        int limit = Math.min(10, lastProxyResults.size());
-        for (int i = 0; i < limit; i++) {
-            if (i > 0) text.append(",");
-            text.append(lastProxyResults.get(i).address());
-        }
-        copyText("proxyip-top10", text.toString(), "已复制前 " + limit + " 个 ProxyIP");
     }
 
     private void copyBoundNodes() {
@@ -2092,7 +2070,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setRequestProperty("Authorization", "Bearer " + textspaceToken());
         conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.20");
+        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.21");
         if (body != null) {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
