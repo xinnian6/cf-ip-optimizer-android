@@ -13,14 +13,15 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
-import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
@@ -111,12 +112,6 @@ public class MainActivity extends Activity {
     private Spinner textspaceNoteSpinner;
     private CheckBox realCheck;
     private CheckBox allRegionCheck;
-    private CheckBox hkCheck;
-    private CheckBox sgCheck;
-    private CheckBox jpCheck;
-    private CheckBox krCheck;
-    private CheckBox usCheck;
-    private CheckBox twCheck;
     private Button startButton;
     private Button copyButton;
     private Button copyBoundNodesButton;
@@ -133,7 +128,10 @@ public class MainActivity extends Activity {
     private TextView resultText;
     private TextView proxyResultText;
     private TextView logText;
+    private TextView regionSummaryText;
     private LinearLayout proxyButtonList;
+    private Button regionCustomButton;
+    private Button normalizeNoteButton;
 
     private volatile boolean running = false;
     private volatile boolean textspaceRunning = false;
@@ -141,6 +139,8 @@ public class MainActivity extends Activity {
     private List<Result> lastResults = new ArrayList<>();
     private List<ProxyResult> lastProxyResults = new ArrayList<>();
     private List<NoteSummary> textspaceNotes = new ArrayList<>();
+    private final List<RegionItem> regionItems = new ArrayList<>();
+    private final Set<String> selectedRegionCodes = new LinkedHashSet<>();
     private NoteDetail currentNote;
 
     @Override
@@ -170,7 +170,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("CF 手机优选 v1.12");
+        title.setText("CF 手机优选 v1.14");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(TEXT);
@@ -308,7 +308,6 @@ public class MainActivity extends Activity {
         });
 
         textspaceTitleEdit = input(publishCard, "文本标题", pref("textspaceTitle", "CF 手机优选结果"), 1, false);
-        textspaceContentEdit = input(publishCard, "文本内容（可编辑，保存后分享 URL 就会更新）", pref("textspaceContent", ""), 6, false);
 
         LinearLayout pubRow1 = row(publishCard);
         saveNoteButton = button("保存文本", GREEN);
@@ -326,16 +325,24 @@ public class MainActivity extends Activity {
         saveResultButton.setOnClickListener(v -> saveScanResultsToTextspace());
         pubRow2.addView(saveResultButton, new LinearLayout.LayoutParams(0, dp(44), 1));
 
+        saveBoundNodesButton = button("保存绑定节点", BLUE);
+        saveBoundNodesButton.setOnClickListener(v -> saveBoundNodesToTextspace());
+        LinearLayout.LayoutParams boundLp = new LinearLayout.LayoutParams(0, dp(44), 1);
+        boundLp.leftMargin = dp(8);
+        pubRow2.addView(saveBoundNodesButton, boundLp);
+
+        LinearLayout pubRow3 = row(publishCard);
+        normalizeNoteButton = button("解码整理", ORANGE);
+        normalizeNoteButton.setOnClickListener(v -> normalizeTextspaceContent());
+        pubRow3.addView(normalizeNoteButton, new LinearLayout.LayoutParams(0, dp(44), 1));
+
         deleteNoteButton = button("删除文本", Color.rgb(220, 38, 38));
         deleteNoteButton.setOnClickListener(v -> confirmDeleteTextspaceNote());
         LinearLayout.LayoutParams deleteLp = new LinearLayout.LayoutParams(0, dp(44), 1);
         deleteLp.leftMargin = dp(8);
-        pubRow2.addView(deleteNoteButton, deleteLp);
+        pubRow3.addView(deleteNoteButton, deleteLp);
 
-        LinearLayout pubRow3 = row(publishCard);
-        saveBoundNodesButton = button("保存绑定节点", BLUE);
-        saveBoundNodesButton.setOnClickListener(v -> saveBoundNodesToTextspace());
-        pubRow3.addView(saveBoundNodesButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
+        textspaceContentEdit = input(publishCard, "文本内容（明文可编辑，一行一个节点；保存并分享后给 v2rayN 的 /sub 会自动输出订阅格式）", pref("textspaceContent", ""), 8, false);
 
         LinearLayout logCard = card(root, "运行日志");
         logText = monoText();
@@ -479,50 +486,293 @@ public class MainActivity extends Activity {
     }
 
     private void addRegionFilters(LinearLayout root) {
-        TextView label = label("区域筛选（全不选时测试全部）");
+        initRegionState();
+
+        TextView label = label("区域筛选");
         root.addView(label);
 
-        LinearLayout rowA = row(root);
-        allRegionCheck = regionCheck(rowA, "全部", prefs.getBoolean("regionAll", true));
-        hkCheck = regionCheck(rowA, "香港", prefs.getBoolean("regionHK", true));
-        sgCheck = regionCheck(rowA, "新加坡", prefs.getBoolean("regionSG", true));
-        jpCheck = regionCheck(rowA, "日本", prefs.getBoolean("regionJP", true));
+        LinearLayout regionBox = new LinearLayout(this);
+        regionBox.setOrientation(LinearLayout.VERTICAL);
+        regionBox.setPadding(dp(10), dp(8), dp(10), dp(10));
+        regionBox.setBackground(fieldBg());
+        root.addView(regionBox, fieldLp());
 
-        LinearLayout rowB = row(root);
-        krCheck = regionCheck(rowB, "韩国", prefs.getBoolean("regionKR", true));
-        usCheck = regionCheck(rowB, "美国", prefs.getBoolean("regionUS", true));
-        twCheck = regionCheck(rowB, "台湾", prefs.getBoolean("regionTW", true));
+        regionSummaryText = new TextView(this);
+        regionSummaryText.setTextSize(13);
+        regionSummaryText.setTextColor(TEXT);
+        regionSummaryText.setPadding(0, 0, 0, dp(6));
+        regionBox.addView(regionSummaryText);
 
+        LinearLayout controls = new LinearLayout(this);
+        controls.setOrientation(LinearLayout.HORIZONTAL);
+        regionBox.addView(controls);
+
+        allRegionCheck = new CheckBox(this);
+        allRegionCheck.setText("全部区域");
+        allRegionCheck.setTextSize(13);
+        allRegionCheck.setChecked(prefs.getBoolean("regionAllV2", false));
         allRegionCheck.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            if (buttonView.isPressed()) setRegionChecks(isChecked);
+            updateRegionSummary();
+            saveRegionPrefs();
         });
-        CompoundButton.OnCheckedChangeListener childListener = (buttonView, isChecked) -> {
-            if (buttonView.isPressed() && !isChecked) allRegionCheck.setChecked(false);
-        };
-        hkCheck.setOnCheckedChangeListener(childListener);
-        sgCheck.setOnCheckedChangeListener(childListener);
-        jpCheck.setOnCheckedChangeListener(childListener);
-        krCheck.setOnCheckedChangeListener(childListener);
-        usCheck.setOnCheckedChangeListener(childListener);
-        twCheck.setOnCheckedChangeListener(childListener);
+        controls.addView(allRegionCheck, new LinearLayout.LayoutParams(0, dp(42), 1));
+
+        regionCustomButton = button("自定义区域", BLUE);
+        regionCustomButton.setOnClickListener(v -> showRegionDialog());
+        LinearLayout.LayoutParams customLp = new LinearLayout.LayoutParams(dp(122), dp(42));
+        customLp.leftMargin = dp(8);
+        controls.addView(regionCustomButton, customLp);
+
+        updateRegionSummary();
     }
 
-    private CheckBox regionCheck(LinearLayout row, String text, boolean checked) {
-        CheckBox cb = new CheckBox(this);
-        cb.setText(text);
-        cb.setTextSize(13);
-        cb.setChecked(checked);
-        row.addView(cb, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        return cb;
+    private void initRegionState() {
+        if (!regionItems.isEmpty()) return;
+        addRegionItem(regionItems, "HK", "香港");
+        addRegionItem(regionItems, "SG", "新加坡");
+        addRegionItem(regionItems, "JP", "日本");
+        addRegionItem(regionItems, "KR", "韩国");
+        addRegionItem(regionItems, "US", "美国");
+        addRegionItem(regionItems, "TW", "台湾");
+        addRegionItem(regionItems, "DE", "德国");
+        addRegionItem(regionItems, "NL", "荷兰");
+        addRegionItem(regionItems, "GB", "英国");
+        addRegionItem(regionItems, "CA", "加拿大");
+        addRegionItem(regionItems, "AU", "澳大利亚");
+        addRegionItem(regionItems, "FR", "法国");
+        addRegionItem(regionItems, "RU", "俄罗斯");
+        addRegionItem(regionItems, "TH", "泰国");
+        addRegionItem(regionItems, "VN", "越南");
+        addRegionItem(regionItems, "MY", "马来西亚");
+        addRegionItem(regionItems, "PH", "菲律宾");
+        addRegionItem(regionItems, "ID", "印度尼西亚");
+        loadCustomRegions(regionItems, prefs.getString("regionCustomItemsV2", ""));
+
+        selectedRegionCodes.clear();
+        String saved = prefs.getString("regionSelectedV2", "HK,SG,JP,KR,US");
+        for (String raw : saved.split(",")) {
+            String code = cleanRegionCode(raw);
+            if (!code.isEmpty()) selectedRegionCodes.add(code);
+        }
     }
 
-    private void setRegionChecks(boolean checked) {
-        hkCheck.setChecked(checked);
-        sgCheck.setChecked(checked);
-        jpCheck.setChecked(checked);
-        krCheck.setChecked(checked);
-        usCheck.setChecked(checked);
-        twCheck.setChecked(checked);
+    private void showRegionDialog() {
+        initRegionState();
+        List<RegionItem> draftItems = new ArrayList<>();
+        for (RegionItem item : regionItems) draftItems.add(new RegionItem(item.code, item.name, item.custom));
+        Set<String> draftSelected = new LinkedHashSet<>(selectedRegionCodes);
+
+        LinearLayout dialogRoot = new LinearLayout(this);
+        dialogRoot.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(14);
+        dialogRoot.setPadding(pad, dp(8), pad, 0);
+
+        EditText search = new EditText(this);
+        search.setSingleLine(true);
+        search.setHint("搜索国家/地区，例如 香港、HK、日本、JP");
+        search.setTextSize(14);
+        search.setPadding(dp(10), 0, dp(10), 0);
+        search.setBackground(fieldBg());
+        dialogRoot.addView(search, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
+
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        ScrollView listScroll = new ScrollView(this);
+        listScroll.addView(list);
+        LinearLayout.LayoutParams listLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(300));
+        listLp.topMargin = dp(8);
+        dialogRoot.addView(listScroll, listLp);
+
+        LinearLayout addRow = new LinearLayout(this);
+        addRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams addRowLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        addRowLp.topMargin = dp(8);
+        dialogRoot.addView(addRow, addRowLp);
+
+        EditText customInput = new EditText(this);
+        customInput.setSingleLine(true);
+        customInput.setHint("添加：德国#DE 或 DE 德国");
+        customInput.setTextSize(14);
+        customInput.setPadding(dp(10), 0, dp(10), 0);
+        customInput.setBackground(fieldBg());
+        addRow.addView(customInput, new LinearLayout.LayoutParams(0, dp(44), 1));
+
+        Button addButton = button("添加", GREEN);
+        LinearLayout.LayoutParams addLp = new LinearLayout.LayoutParams(dp(78), dp(44));
+        addLp.leftMargin = dp(8);
+        addRow.addView(addButton, addLp);
+
+        Runnable render = () -> renderRegionDialogList(list, draftItems, draftSelected, search.getText().toString());
+        render.run();
+
+        search.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                render.run();
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+
+        addButton.setOnClickListener(v -> {
+            RegionItem item = parseRegionInput(customInput.getText().toString());
+            if (item == null) {
+                Toast.makeText(this, "请输入 国家#代码，例如 香港#HK", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            addRegionItem(draftItems, item.code, item.name, true);
+            draftSelected.add(item.code);
+            customInput.setText("");
+            render.run();
+        });
+
+        new AlertDialog.Builder(this)
+                .setTitle("自定义区域")
+                .setView(dialogRoot)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("保存", (dialog, which) -> {
+                    regionItems.clear();
+                    regionItems.addAll(draftItems);
+                    selectedRegionCodes.clear();
+                    selectedRegionCodes.addAll(draftSelected);
+                    if (allRegionCheck != null) allRegionCheck.setChecked(false);
+                    saveRegionPrefs();
+                    updateRegionSummary();
+                })
+                .show();
+    }
+
+    private void renderRegionDialogList(LinearLayout list, List<RegionItem> items, Set<String> selected, String query) {
+        list.removeAllViews();
+        String q = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+        int shown = 0;
+        for (RegionItem item : items) {
+            String text = item.name + " #" + item.code;
+            if (!q.isEmpty()
+                    && !item.code.toLowerCase(Locale.ROOT).contains(q)
+                    && !item.name.toLowerCase(Locale.ROOT).contains(q)
+                    && !text.toLowerCase(Locale.ROOT).contains(q)) {
+                continue;
+            }
+            CheckBox cb = new CheckBox(this);
+            cb.setText(text);
+            cb.setTextSize(14);
+            cb.setChecked(selected.contains(item.code));
+            cb.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                if (isChecked) selected.add(item.code);
+                else selected.remove(item.code);
+            });
+            list.addView(cb, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40)));
+            shown++;
+        }
+        if (shown == 0) {
+            TextView empty = label("没有匹配项，可以在下面添加。");
+            list.addView(empty);
+        }
+    }
+
+    private void updateRegionSummary() {
+        if (regionSummaryText == null) return;
+        if (allRegionCheck != null && allRegionCheck.isChecked()) {
+            regionSummaryText.setText("当前：全部区域（不按 #HK / #JP 过滤）");
+            return;
+        }
+        if (selectedRegionCodes.isEmpty()) {
+            regionSummaryText.setText("当前：未勾选，将测试全部区域");
+            return;
+        }
+        List<String> names = new ArrayList<>();
+        for (String code : selectedRegionCodes) names.add(regionName(code) + " #" + code);
+        regionSummaryText.setText("当前：" + join(names, "、"));
+    }
+
+    private void saveRegionPrefs() {
+        prefs.edit()
+                .putBoolean("regionAllV2", allRegionCheck != null && allRegionCheck.isChecked())
+                .putString("regionSelectedV2", join(new ArrayList<>(selectedRegionCodes), ","))
+                .putString("regionCustomItemsV2", customRegionPrefsValue())
+                .apply();
+    }
+
+    private String customRegionPrefsValue() {
+        StringBuilder out = new StringBuilder();
+        for (RegionItem item : regionItems) {
+            if (!item.custom) continue;
+            out.append(item.code).append("|").append(item.name.replace("|", " ")).append("\n");
+        }
+        return out.toString().trim();
+    }
+
+    private void loadCustomRegions(List<RegionItem> target, String value) {
+        if (value == null || value.trim().isEmpty()) return;
+        for (String raw : value.split("\\r?\\n")) {
+            String[] parts = raw.split("\\|", 2);
+            if (parts.length == 2) addRegionItem(target, parts[0], parts[1], true);
+        }
+    }
+
+    private void addRegionItem(List<RegionItem> target, String code, String name) {
+        addRegionItem(target, code, name, false);
+    }
+
+    private void addRegionItem(List<RegionItem> target, String code, String name, boolean custom) {
+        String cleanCode = cleanRegionCode(code);
+        String cleanName = name == null ? "" : name.trim();
+        if (cleanCode.isEmpty()) return;
+        if (cleanName.isEmpty()) cleanName = cleanCode;
+        for (int i = 0; i < target.size(); i++) {
+            RegionItem item = target.get(i);
+            if (cleanCode.equals(item.code)) {
+                target.set(i, new RegionItem(cleanCode, cleanName, item.custom && custom));
+                return;
+            }
+        }
+        target.add(new RegionItem(cleanCode, cleanName, custom));
+    }
+
+    private RegionItem parseRegionInput(String value) {
+        if (value == null) return null;
+        String text = value.trim();
+        if (text.isEmpty()) return null;
+        String name = "";
+        String code = "";
+        int hash = text.lastIndexOf('#');
+        if (hash >= 0) {
+            name = text.substring(0, hash).trim();
+            code = text.substring(hash + 1).trim();
+        } else {
+            String[] parts = text.split("[,;\\s]+", 2);
+            if (parts.length == 2) {
+                if (parts[0].matches("(?i)[A-Z]{2,4}")) {
+                    code = parts[0];
+                    name = parts[1];
+                } else {
+                    name = parts[0];
+                    code = parts[1];
+                }
+            } else if (parts[0].matches("(?i)[A-Z]{2,4}")) {
+                code = parts[0];
+                name = parts[0].toUpperCase(Locale.ROOT);
+            }
+        }
+        code = cleanRegionCode(code);
+        if (code.isEmpty()) return null;
+        if (name.isEmpty()) name = code;
+        return new RegionItem(code, name, true);
+    }
+
+    private String cleanRegionCode(String raw) {
+        if (raw == null) return "";
+        return raw.trim().replace("#", "").toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]", "");
+    }
+
+    private String join(List<String> values, String separator) {
+        StringBuilder out = new StringBuilder();
+        for (String value : values) {
+            if (value == null || value.isEmpty()) continue;
+            if (out.length() > 0) out.append(separator);
+            out.append(value);
+        }
+        return out.toString();
     }
 
     private void startScan() {
@@ -670,15 +920,9 @@ public class MainActivity extends Activity {
     }
 
     private Set<String> selectedRegions() {
-        if (allRegionCheck.isChecked()) return Collections.emptySet();
-        Set<String> regions = new LinkedHashSet<>();
-        if (hkCheck.isChecked()) regions.add("HK");
-        if (sgCheck.isChecked()) regions.add("SG");
-        if (jpCheck.isChecked()) regions.add("JP");
-        if (krCheck.isChecked()) regions.add("KR");
-        if (usCheck.isChecked()) regions.add("US");
-        if (twCheck.isChecked()) regions.add("TW");
-        return regions;
+        initRegionState();
+        if (allRegionCheck != null && allRegionCheck.isChecked()) return Collections.emptySet();
+        return new LinkedHashSet<>(selectedRegionCodes);
     }
 
     private void saveConfig() {
@@ -704,13 +948,9 @@ public class MainActivity extends Activity {
                 .putString("downloadMb", downloadMbEdit.getText().toString())
                 .putString("minSpeed", minSpeedEdit.getText().toString())
                 .putBoolean("realCheck", realCheck.isChecked())
-                .putBoolean("regionAll", allRegionCheck.isChecked())
-                .putBoolean("regionHK", hkCheck.isChecked())
-                .putBoolean("regionSG", sgCheck.isChecked())
-                .putBoolean("regionJP", jpCheck.isChecked())
-                .putBoolean("regionKR", krCheck.isChecked())
-                .putBoolean("regionUS", usCheck.isChecked())
-                .putBoolean("regionTW", twCheck.isChecked())
+                .putBoolean("regionAllV2", allRegionCheck != null && allRegionCheck.isChecked())
+                .putString("regionSelectedV2", join(new ArrayList<>(selectedRegionCodes), ","))
+                .putString("regionCustomItemsV2", customRegionPrefsValue())
                 .apply();
     }
 
@@ -883,7 +1123,7 @@ public class MainActivity extends Activity {
                     + "Connection: Upgrade\r\n"
                     + "Sec-WebSocket-Key: " + key + "\r\n"
                     + "Sec-WebSocket-Version: 13\r\n"
-                    + "User-Agent: CFMobileOptimizer/1.11\r\n\r\n";
+                    + "User-Agent: CFMobileOptimizer/1.14\r\n\r\n";
             out.write(request.getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
@@ -1003,7 +1243,7 @@ public class MainActivity extends Activity {
         String path = target.getFile().isEmpty() ? "/" : target.getFile();
         String request = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: " + host + "\r\n"
-                + "User-Agent: CFMobileOptimizer/1.11\r\n"
+                + "User-Agent: CFMobileOptimizer/1.14\r\n"
                 + "Accept: */*\r\n"
                 + "Connection: close\r\n\r\n";
         out.write(request.getBytes(StandardCharsets.US_ASCII));
@@ -1016,7 +1256,7 @@ public class MainActivity extends Activity {
             HttpURLConnection conn = (HttpURLConnection) new URL(text).openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
-            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.11");
+            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.14");
             try (InputStream in = conn.getInputStream()) {
                 text = new String(readAll(in), StandardCharsets.UTF_8);
             }
@@ -1342,11 +1582,85 @@ public class MainActivity extends Activity {
             if (textspaceTitleEdit.getText().toString().trim().isEmpty()) {
                 textspaceTitleEdit.setText("Edgetunnel 绑定节点");
             }
-            textspaceContentEdit.setText(mergeLines(textspaceContentEdit.getText().toString(), text));
+            String existing = normalizeEditableSubscription(textspaceContentEdit.getText().toString());
+            textspaceContentEdit.setText(mergeLines(existing, text));
             saveTextspaceNote(true);
         } catch (Exception e) {
             Toast.makeText(this, e.getMessage(), Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void normalizeTextspaceContent() {
+        String before = textspaceContentEdit.getText().toString();
+        String after = normalizeEditableSubscription(before);
+        textspaceContentEdit.setText(after);
+        if (before.trim().equals(after.trim())) {
+            Toast.makeText(this, "内容已经是可编辑文本", Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(this, "已解码并整理为一行一个节点", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private String normalizeEditableSubscription(String value) {
+        String text = value == null ? "" : value.trim();
+        String decoded = decodeBase64Subscription(text);
+        if (decoded != null && !decoded.trim().isEmpty()) {
+            return mergeLines("", decoded.trim());
+        }
+        if (looksLikeEditableSubscription(text)) {
+            return mergeLines("", text);
+        }
+        return text;
+    }
+
+    private String decodeBase64Subscription(String value) {
+        if (value == null) return null;
+        String text = value.trim();
+        if (text.isEmpty()) return null;
+        if (looksLikeEditableSubscription(text)) return null;
+        String compact = text.replaceAll("\\s+", "");
+        if (compact.length() < 12 || !compact.matches("[A-Za-z0-9+/=_-]+")) return null;
+
+        List<String> attempts = new ArrayList<>();
+        attempts.add(compact);
+        attempts.add(padBase64(compact));
+        attempts.add(compact.replace('-', '+').replace('_', '/'));
+        attempts.add(padBase64(compact.replace('-', '+').replace('_', '/')));
+
+        for (String candidate : attempts) {
+            String decoded = tryDecodeBase64(candidate, false);
+            if (decoded != null) return decoded;
+            decoded = tryDecodeBase64(candidate, true);
+            if (decoded != null) return decoded;
+        }
+        return null;
+    }
+
+    private String tryDecodeBase64(String value, boolean urlSafe) {
+        try {
+            byte[] bytes = urlSafe ? Base64.getUrlDecoder().decode(value) : Base64.getDecoder().decode(value);
+            String decoded = new String(bytes, StandardCharsets.UTF_8).trim();
+            if (looksLikeEditableSubscription(decoded)) return decoded;
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private String padBase64(String value) {
+        int mod = value.length() % 4;
+        if (mod == 0) return value;
+        StringBuilder out = new StringBuilder(value);
+        for (int i = mod; i < 4; i++) out.append("=");
+        return out.toString();
+    }
+
+    private boolean looksLikeEditableSubscription(String text) {
+        if (text == null) return false;
+        String lower = text.toLowerCase(Locale.ROOT);
+        if (lower.contains("vless://") || lower.contains("trojan://") || lower.contains("ss://") || lower.contains("vmess://")) {
+            return true;
+        }
+        return text.matches("(?s).*\\b(?:\\d{1,3}\\.){3}\\d{1,3}:\\d{2,5}.*");
     }
 
     private String mergeLines(String existing, String added) {
@@ -1462,7 +1776,7 @@ public class MainActivity extends Activity {
                 saveConfig();
                 String noteId = currentNote == null ? "" : currentNote.id;
                 String title = textspaceTitleEdit.getText().toString().trim();
-                String content = textspaceContentEdit.getText().toString();
+                String content = normalizeEditableSubscription(textspaceContentEdit.getText().toString());
                 if (title.isEmpty()) title = "CF 手机优选结果";
 
                 JSONObject body = new JSONObject();
@@ -1487,9 +1801,11 @@ public class MainActivity extends Activity {
                 }
 
                 String finalTitle = title;
+                String finalContent = content;
                 String finalShareUrl = shareUrl;
                 ui.post(() -> {
                     textspaceTitleEdit.setText(finalTitle);
+                    textspaceContentEdit.setText(finalContent);
                     upsertNoteSummary(currentNote);
                     updateTextspaceSpinner();
                     selectNoteInSpinner(currentNote.id);
@@ -1561,6 +1877,7 @@ public class MainActivity extends Activity {
         saveBoundNodesButton.setEnabled(enabled);
         saveNoteButton.setEnabled(enabled);
         shareNoteButton.setEnabled(enabled);
+        normalizeNoteButton.setEnabled(enabled);
         deleteNoteButton.setEnabled(enabled);
     }
 
@@ -1595,7 +1912,7 @@ public class MainActivity extends Activity {
     private void applyNote(NoteDetail note) {
         currentNote = note;
         textspaceTitleEdit.setText(note.title);
-        textspaceContentEdit.setText(note.content);
+        textspaceContentEdit.setText(normalizeEditableSubscription(note.content));
         upsertNoteSummary(note);
         updateTextspaceSpinner();
         selectNoteInSpinner(note.id);
@@ -1641,7 +1958,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setRequestProperty("Authorization", "Bearer " + textspaceToken());
         conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.11");
+        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.14");
         if (body != null) {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
@@ -1889,31 +2206,43 @@ public class MainActivity extends Activity {
     }
 
     private String normalizeRegion(String region) {
-        String code = region == null ? "" : region.trim().toUpperCase(Locale.ROOT);
-        if (code.startsWith("HK") || code.contains("香港")) return "HK";
-        if (code.startsWith("SG") || code.contains("新加坡")) return "SG";
-        if (code.startsWith("JP") || code.contains("日本")) return "JP";
-        if (code.startsWith("KR") || code.contains("韩国") || code.contains("韓國")) return "KR";
-        if (code.startsWith("US") || code.contains("美国") || code.contains("美國")) return "US";
-        if (code.startsWith("TW") || code.contains("台湾") || code.contains("台灣")) return "TW";
-        return code;
+        initRegionState();
+        String raw = region == null ? "" : region.trim();
+        String upper = raw.toUpperCase(Locale.ROOT);
+        if (upper.startsWith("UK") || upper.contains("英国") || upper.contains("英國")) return "GB";
+        if (upper.contains("美國")) return "US";
+        if (upper.contains("韓國")) return "KR";
+        if (upper.contains("台灣")) return "TW";
+        for (RegionItem item : regionItems) {
+            if (upper.startsWith(item.code) || (!item.name.isEmpty() && upper.contains(item.name.toUpperCase(Locale.ROOT)))) {
+                return item.code;
+            }
+        }
+        return cleanRegionCode(upper);
     }
 
     private String regionName(String region) {
         String code = normalizeRegion(region);
-        switch (code) {
-            case "HK": return "香港";
-            case "JP": return "日本";
-            case "KR": return "韩国";
-            case "SG": return "新加坡";
-            case "TW": return "台湾";
-            case "US": return "美国";
-            default: return code.isEmpty() ? "未知" : code;
+        for (RegionItem item : regionItems) {
+            if (code.equals(item.code)) return item.name;
         }
+        return code.isEmpty() ? "未知" : code;
     }
 
     private int dp(int value) {
         return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    static class RegionItem {
+        final String code;
+        final String name;
+        final boolean custom;
+
+        RegionItem(String code, String name, boolean custom) {
+            this.code = code == null ? "" : code;
+            this.name = name == null ? "" : name;
+            this.custom = custom;
+        }
     }
 
     static class Config {
