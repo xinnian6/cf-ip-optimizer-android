@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 信号波纹 -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M34,62 a24,24 0 0 1 40,0" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M26,52 a36,36 0 0 1 56,0" />
+    <!-- 向上加速箭头 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,44 L66,60 L58,60 L58,78 L50,78 L50,60 L42,60 Z" />
+</vector>

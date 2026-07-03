@@ -1,0 +1,20 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 信号柱，从矮到高，代表测速由慢到快 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M36,64h8v14h-8z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M50,54h8v24h-8z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M64,42h8v36h-8z" />
+    <!-- 向上加速箭头 -->
+    <path
+        android:fillColor="#FFBFDBFE"
+        android:pathData="M34,50L54,30L74,50L64,50L64,40L44,40L44,50Z" />
+</vector>

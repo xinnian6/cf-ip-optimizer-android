@@ -170,7 +170,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("CF 手机优选 v1.8");
+        title.setText("CF 手机优选 v1.12");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(TEXT);
@@ -208,7 +208,7 @@ public class MainActivity extends Activity {
         candidatesEdit = smallInput(row1, "候选数", pref("candidates", "100"));
 
         LinearLayout row2 = row(paramCard);
-        maxTcpMsEdit = smallInput(row2, "最大 TCP ms", pref("maxTcpMs", "120"));
+        maxTcpMsEdit = smallInput(row2, "最大 TCP ms", pref("maxTcpMs", "250"));
         repeatsEdit = smallInput(row2, "复测次数", pref("repeats", "2"));
         downloadMbEdit = smallInput(row2, "单 IP 下载 MiB", pref("downloadMb", "2"));
 
@@ -838,8 +838,8 @@ public class MainActivity extends Activity {
                 for (int i = 0; i < config.repeats; i++) {
                     probeWs(r, config);
                 }
-                r.handshakeOk = r.wsSuccesses == config.repeats;
-                r.realOk = config.realCheck ? r.realSuccesses == config.repeats : r.handshakeOk;
+                r.handshakeOk = r.wsSuccesses >= 1;
+                r.realOk = config.realCheck ? r.realSuccesses >= 1 : r.handshakeOk;
                 r.fastOk = r.realOk && (!config.realCheck || r.speedMbps >= config.minSpeedMbps);
                 int n = done.incrementAndGet();
                 progress(config.runId, "WS / 真实测速", n, candidates.size());
