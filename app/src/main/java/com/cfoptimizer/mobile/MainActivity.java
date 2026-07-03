@@ -1287,7 +1287,7 @@ public class MainActivity extends Activity {
                 + "&host=" + urlPart(config.host)
                 + "&path=" + urlPart(path)
                 + "&sni=" + urlPart(config.host)
-                + "&fp=randomized";
+                + "&fp=chrome";
         return "vless://" + config.uuid + "@" + r.address() + "?" + query + "#" + urlPart(remark);
     }
 
@@ -1328,7 +1328,7 @@ public class MainActivity extends Activity {
                 textspaceTitleEdit.setText("Edgetunnel 绑定节点");
             }
             textspaceContentEdit.setText(mergeLines(textspaceContentEdit.getText().toString(), text));
-            saveTextspaceNote(false);
+            saveTextspaceNote(true);
         } catch (Exception e) {
             Toast.makeText(this, e.getMessage(), Toast.LENGTH_SHORT).show();
         }
@@ -1466,7 +1466,7 @@ public class MainActivity extends Activity {
                 if (share) {
                     JSONObject sharedJson = new JSONObject(textspaceRequest("POST", "/api/notes/" + urlPart(currentNote.id) + "/share", "{}"));
                     currentNote = parseNote(sharedJson);
-                    shareUrl = textspaceBaseUrl() + "/s/" + urlPart(currentNote.shareToken);
+                    shareUrl = textspaceBaseUrl() + "/sub/" + urlPart(currentNote.shareToken);
                 }
 
                 String finalTitle = title;
