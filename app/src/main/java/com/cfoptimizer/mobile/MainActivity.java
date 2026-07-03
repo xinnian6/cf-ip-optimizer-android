@@ -134,7 +134,6 @@ public class MainActivity extends Activity {
     private TextView regionSummaryText;
     private LinearLayout proxyButtonList;
     private Button regionCustomButton;
-    private Button normalizeNoteButton;
 
     private volatile boolean running = false;
     private volatile boolean textspaceRunning = false;
@@ -173,7 +172,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("CF 手机优选 v1.15");
+        title.setText("CF 手机优选 v1.16");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(TEXT);
@@ -293,9 +292,14 @@ public class MainActivity extends Activity {
         noteRow.addView(textspaceNoteSpinner, new LinearLayout.LayoutParams(0, dp(44), 1));
         refreshNotesButton = button("刷新", BLUE);
         refreshNotesButton.setOnClickListener(v -> loadTextspaceNotes(true));
-        LinearLayout.LayoutParams refreshLp = new LinearLayout.LayoutParams(dp(82), dp(44));
+        LinearLayout.LayoutParams refreshLp = new LinearLayout.LayoutParams(dp(66), dp(44));
         refreshLp.leftMargin = dp(8);
         noteRow.addView(refreshNotesButton, refreshLp);
+        shareNoteButton = button("分享", GREEN);
+        shareNoteButton.setOnClickListener(v -> saveTextspaceNote(true));
+        LinearLayout.LayoutParams shareTopLp = new LinearLayout.LayoutParams(dp(66), dp(44));
+        shareTopLp.leftMargin = dp(8);
+        noteRow.addView(shareNoteButton, shareTopLp);
         textspaceNoteSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
@@ -315,13 +319,7 @@ public class MainActivity extends Activity {
         LinearLayout pubRow1 = row(publishCard);
         saveNoteButton = button("保存文本", GREEN);
         saveNoteButton.setOnClickListener(v -> saveTextspaceNote(false));
-        pubRow1.addView(saveNoteButton, new LinearLayout.LayoutParams(0, dp(44), 1));
-
-        shareNoteButton = button("保存并分享", BLUE);
-        shareNoteButton.setOnClickListener(v -> saveTextspaceNote(true));
-        LinearLayout.LayoutParams shareLp = new LinearLayout.LayoutParams(0, dp(44), 1);
-        shareLp.leftMargin = dp(8);
-        pubRow1.addView(shareNoteButton, shareLp);
+        pubRow1.addView(saveNoteButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
 
         LinearLayout pubRow2 = row(publishCard);
         saveResultButton = button("保存测速结果", ORANGE);
@@ -337,20 +335,14 @@ public class MainActivity extends Activity {
         LinearLayout pubRow3 = row(publishCard);
         manageNodesButton = button("节点管理", GREEN);
         manageNodesButton.setOnClickListener(v -> showNodeManager());
-        pubRow3.addView(manageNodesButton, new LinearLayout.LayoutParams(0, dp(44), 1));
-
-        normalizeNoteButton = button("解码/去重", ORANGE);
-        normalizeNoteButton.setOnClickListener(v -> normalizeTextspaceContent());
-        LinearLayout.LayoutParams normalizeLp = new LinearLayout.LayoutParams(0, dp(44), 1);
-        normalizeLp.leftMargin = dp(8);
-        pubRow3.addView(normalizeNoteButton, normalizeLp);
+        pubRow3.addView(manageNodesButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
 
         LinearLayout pubRow4 = row(publishCard);
         deleteNoteButton = button("删除文本", Color.rgb(220, 38, 38));
         deleteNoteButton.setOnClickListener(v -> confirmDeleteTextspaceNote());
         pubRow4.addView(deleteNoteButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
 
-        textspaceContentEdit = input(publishCard, "文本内容（明文可编辑，一行一个节点；保存并分享后给 v2rayN 的 /sub 会自动输出订阅格式）", pref("textspaceContent", ""), 8, false);
+        textspaceContentEdit = input(publishCard, "文本内容（明文可编辑，一行一个节点；分享 URL 会给 v2rayN 输出订阅格式）", pref("textspaceContent", ""), 8, false);
 
         LinearLayout logCard = card(root, "运行日志");
         logText = monoText();
@@ -1131,7 +1123,7 @@ public class MainActivity extends Activity {
                     + "Connection: Upgrade\r\n"
                     + "Sec-WebSocket-Key: " + key + "\r\n"
                     + "Sec-WebSocket-Version: 13\r\n"
-                    + "User-Agent: CFMobileOptimizer/1.15\r\n\r\n";
+                    + "User-Agent: CFMobileOptimizer/1.16\r\n\r\n";
             out.write(request.getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
@@ -1251,7 +1243,7 @@ public class MainActivity extends Activity {
         String path = target.getFile().isEmpty() ? "/" : target.getFile();
         String request = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: " + host + "\r\n"
-                + "User-Agent: CFMobileOptimizer/1.15\r\n"
+                + "User-Agent: CFMobileOptimizer/1.16\r\n"
                 + "Accept: */*\r\n"
                 + "Connection: close\r\n\r\n";
         out.write(request.getBytes(StandardCharsets.US_ASCII));
@@ -1264,7 +1256,7 @@ public class MainActivity extends Activity {
             HttpURLConnection conn = (HttpURLConnection) new URL(text).openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
-            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.15");
+            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.16");
             try (InputStream in = conn.getInputStream()) {
                 text = new String(readAll(in), StandardCharsets.UTF_8);
             }
@@ -1592,20 +1584,9 @@ public class MainActivity extends Activity {
             }
             String existing = normalizeEditableSubscription(textspaceContentEdit.getText().toString());
             textspaceContentEdit.setText(mergeLines(existing, text));
-            saveTextspaceNote(true);
+            saveTextspaceNote(false);
         } catch (Exception e) {
             Toast.makeText(this, e.getMessage(), Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    private void normalizeTextspaceContent() {
-        String before = textspaceContentEdit.getText().toString();
-        String after = normalizeEditableSubscription(before);
-        textspaceContentEdit.setText(after);
-        if (before.trim().equals(after.trim())) {
-            Toast.makeText(this, "内容已经是可编辑文本", Toast.LENGTH_SHORT).show();
-        } else {
-            Toast.makeText(this, "已解码并整理为一行一个节点", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -2015,7 +1996,7 @@ public class MainActivity extends Activity {
         if (textspaceRunning) return;
         textspaceRunning = true;
         setTextspaceButtons(false);
-        status(share ? "正在保存并分享" : "正在保存文本");
+        status(share ? "正在保存并复制分享 URL" : "正在保存文本");
 
         new Thread(() -> {
             try {
@@ -2058,7 +2039,7 @@ public class MainActivity extends Activity {
                     if (!finalShareUrl.isEmpty()) {
                         copyText("textspace-share-url", finalShareUrl, "分享 URL 已复制");
                     }
-                    status(share ? "已保存并复制分享 URL：" + finalShareUrl : "已保存文本：" + finalTitle);
+                    status(share ? "已复制分享 URL：" + finalShareUrl : "已保存文本：" + finalTitle);
                 });
             } catch (Exception e) {
                 log("TextSpace 保存失败: " + e.getMessage());
@@ -2124,7 +2105,6 @@ public class MainActivity extends Activity {
         saveNoteButton.setEnabled(enabled);
         shareNoteButton.setEnabled(enabled);
         manageNodesButton.setEnabled(enabled);
-        normalizeNoteButton.setEnabled(enabled);
         deleteNoteButton.setEnabled(enabled);
     }
 
@@ -2205,7 +2185,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setRequestProperty("Authorization", "Bearer " + textspaceToken());
         conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.15");
+        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.16");
         if (body != null) {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
