@@ -105,14 +105,11 @@ public class MainActivity extends Activity {
     private EditText downloadMbEdit;
     private EditText minSpeedEdit;
     private EditText realUrlEdit;
-    private EditText hashPrefixEdit;
-    private EditText lineSuffixEdit;
     private EditText textspaceUrlEdit;
     private EditText textspaceTokenEdit;
     private EditText textspaceTitleEdit;
     private EditText textspaceContentEdit;
     private Spinner textspaceNoteSpinner;
-    private CheckBox realCheck;
     private CheckBox allRegionCheck;
     private Button startButton;
     private Button proxyButton;
@@ -167,7 +164,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("CF 手机优选 v1.19");
+        title.setText("CF 手机优选 v1.20");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(TEXT);
@@ -197,19 +194,32 @@ public class MainActivity extends Activity {
         textspaceTokenEdit.setOnFocusChangeListener(autoRefreshTextspace);
         addRegionFilters(sourceCard);
 
+        LinearLayout proxyCard = card(root, "ProxyIP 稳定性");
+        proxySourceEdit = input(proxyCard, "ProxyIP 数据源（网络地址或直接粘贴列表）", pref("proxySource", ""), 1, false);
+        LinearLayout proxyButtons = row(proxyCard);
+        proxyButton = button("测试 ProxyIP", ORANGE);
+        proxyButton.setOnClickListener(v -> startProxyTest());
+        proxyButtons.addView(proxyButton, new LinearLayout.LayoutParams(0, dp(46), 1));
+
+        copyProxyTopButton = button("复制前十", GREEN);
+        copyProxyTopButton.setOnClickListener(v -> copyProxyTop());
+        LinearLayout.LayoutParams proxyCopyLp = new LinearLayout.LayoutParams(0, dp(46), 1);
+        proxyCopyLp.leftMargin = dp(8);
+        proxyButtons.addView(copyProxyTopButton, proxyCopyLp);
+
+        proxyButtonList = new LinearLayout(this);
+        proxyButtonList.setOrientation(LinearLayout.VERTICAL);
+        proxyCard.addView(proxyButtonList);
+
+        proxyResultText = monoText();
+        proxyCard.addView(proxyResultText);
+
         LinearLayout basicCard = card(root, "节点参数");
         hostEdit = input(basicCard, "SNI / Host 域名", pref("host", "xinnian.us.ci"), 1, false);
         pathEdit = input(basicCard, "WS 路径", pref("path", "/"), 1, false);
         uuidEdit = input(basicCard, "VLESS UUID（不填则只验证 WS 握手）", pref("uuid", ""), 1, false);
         proxyEdit = input(basicCard, "组合测试 ProxyIP（可留空，只支持一个）", pref("proxyip", ""), 1, false);
         realUrlEdit = input(basicCard, "真实下载 URL", prefRealUrl(), 1, false);
-        hashPrefixEdit = input(basicCard, "复制名称前缀（放在 # 后面，可留空）", pref("hashPrefix", ""), 1, false);
-        lineSuffixEdit = input(basicCard, "复制行尾追加（放在每行最后，可留空）", pref("lineSuffix", ""), 1, false);
-
-        realCheck = new CheckBox(this);
-        realCheck.setText("开启真实下载测速（需要 UUID）");
-        realCheck.setChecked(prefs.getBoolean("realCheck", true));
-        basicCard.addView(realCheck);
 
         LinearLayout paramCard = card(root, "测速参数");
         LinearLayout row1 = row(paramCard);
@@ -254,12 +264,13 @@ public class MainActivity extends Activity {
         LinearLayout buttons = row(actionCard);
         startButton = button("开始测速", BLUE);
         startButton.setOnClickListener(v -> startScan());
-        buttons.addView(startButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(46)));
+        buttons.addView(startButton, new LinearLayout.LayoutParams(0, dp(44), 1));
 
-        LinearLayout manageRow = row(actionCard);
         manageNodesButton = button("节点管理", GREEN);
         manageNodesButton.setOnClickListener(v -> showNodeManager());
-        manageRow.addView(manageNodesButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
+        LinearLayout.LayoutParams manageLp = new LinearLayout.LayoutParams(0, dp(44), 1);
+        manageLp.leftMargin = dp(8);
+        buttons.addView(manageNodesButton, manageLp);
 
         LinearLayout boundButtons = row(actionCard);
         saveResultButton = button("保存测速结果", ORANGE);
@@ -283,26 +294,6 @@ public class MainActivity extends Activity {
         statusText.setTextColor(MUTED);
         statusText.setPadding(0, dp(7), 0, 0);
         actionCard.addView(statusText);
-
-        LinearLayout proxyCard = card(root, "ProxyIP 稳定性");
-        proxySourceEdit = input(proxyCard, "ProxyIP 数据源（网络地址或直接粘贴列表）", pref("proxySource", ""), 1, false);
-        LinearLayout proxyButtons = row(proxyCard);
-        proxyButton = button("测试 ProxyIP", ORANGE);
-        proxyButton.setOnClickListener(v -> startProxyTest());
-        proxyButtons.addView(proxyButton, new LinearLayout.LayoutParams(0, dp(46), 1));
-
-        copyProxyTopButton = button("复制前十", GREEN);
-        copyProxyTopButton.setOnClickListener(v -> copyProxyTop());
-        LinearLayout.LayoutParams proxyCopyLp = new LinearLayout.LayoutParams(0, dp(46), 1);
-        proxyCopyLp.leftMargin = dp(8);
-        proxyButtons.addView(copyProxyTopButton, proxyCopyLp);
-
-        proxyButtonList = new LinearLayout(this);
-        proxyButtonList.setOrientation(LinearLayout.VERTICAL);
-        proxyCard.addView(proxyButtonList);
-
-        proxyResultText = monoText();
-        proxyCard.addView(proxyResultText);
 
         LinearLayout resultCard = card(root, "测速结果");
         resultText = monoText();
@@ -862,8 +853,6 @@ public class MainActivity extends Activity {
         c.uuid = uuidEdit.getText().toString().trim();
         c.proxyip = firstToken(proxyEdit.getText().toString().trim());
         c.realUrl = realUrlEdit.getText().toString().trim();
-        c.hashPrefix = hashPrefixEdit.getText().toString().trim();
-        c.lineSuffix = lineSuffixEdit.getText().toString().trim();
         c.timeoutMs = Math.max(500, (int) (parseDouble(timeoutEdit, 8) * 1000));
         c.concurrency = clamp((int) parseDouble(concurrencyEdit, 32), 1, 256);
         c.candidates = clamp((int) parseDouble(candidatesEdit, 100), 1, 5000);
@@ -871,14 +860,14 @@ public class MainActivity extends Activity {
         c.repeats = clamp((int) parseDouble(repeatsEdit, 2), 1, 10);
         c.downloadBytes = Math.max(1, (int) (parseDouble(downloadMbEdit, 2) * 1024 * 1024));
         c.minSpeedMbps = Math.max(0, parseDouble(minSpeedEdit, 80));
-        c.realCheck = realCheck.isChecked() && !c.uuid.isEmpty();
+        c.realCheck = !c.uuid.isEmpty();
         c.regions = selectedRegions();
         if (c.host.isEmpty()) throw new IllegalArgumentException("请填写 SNI/Host 域名");
-        if (realCheck.isChecked() && !c.uuid.isEmpty()) UUID.fromString(c.uuid);
+        if (!c.uuid.isEmpty()) UUID.fromString(c.uuid);
         if (c.realCheck && !c.realUrl.toLowerCase(Locale.ROOT).startsWith("http://")) {
             throw new IllegalArgumentException("真实下载 URL 目前请使用 http:// 大文件地址");
         }
-        if (realCheck.isChecked() && c.uuid.isEmpty()) log("未填写 UUID，本次只验证 WS 握手，不做真实下载测速");
+        if (c.uuid.isEmpty()) log("未填写 UUID，本次只验证 WS 握手，不做真实下载测速");
         return c;
     }
 
@@ -916,8 +905,6 @@ public class MainActivity extends Activity {
                 .putString("uuid", uuidEdit.getText().toString())
                 .putString("proxyip", proxyEdit.getText().toString())
                 .putString("realUrl", realUrlEdit.getText().toString())
-                .putString("hashPrefix", hashPrefixEdit.getText().toString())
-                .putString("lineSuffix", lineSuffixEdit.getText().toString())
                 .putString("textspaceUrl", textspaceUrlEdit.getText().toString())
                 .putString("textspaceToken", textspaceTokenEdit.getText().toString())
                 .putString("textspaceTitle", textspaceTitleEdit.getText().toString())
@@ -929,7 +916,6 @@ public class MainActivity extends Activity {
                 .putString("repeats", repeatsEdit.getText().toString())
                 .putString("downloadMb", downloadMbEdit.getText().toString())
                 .putString("minSpeed", minSpeedEdit.getText().toString())
-                .putBoolean("realCheck", realCheck.isChecked())
                 .putBoolean("regionAllV2", allRegionCheck != null && allRegionCheck.isChecked())
                 .putString("regionSelectedV2", join(new ArrayList<>(selectedRegionCodes), ","))
                 .putString("regionCustomItemsV2", customRegionPrefsValue())
@@ -1105,7 +1091,7 @@ public class MainActivity extends Activity {
                     + "Connection: Upgrade\r\n"
                     + "Sec-WebSocket-Key: " + key + "\r\n"
                     + "Sec-WebSocket-Version: 13\r\n"
-                    + "User-Agent: CFMobileOptimizer/1.19\r\n\r\n";
+                    + "User-Agent: CFMobileOptimizer/1.20\r\n\r\n";
             out.write(request.getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
@@ -1225,7 +1211,7 @@ public class MainActivity extends Activity {
         String path = target.getFile().isEmpty() ? "/" : target.getFile();
         String request = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: " + host + "\r\n"
-                + "User-Agent: CFMobileOptimizer/1.19\r\n"
+                + "User-Agent: CFMobileOptimizer/1.20\r\n"
                 + "Accept: */*\r\n"
                 + "Connection: close\r\n\r\n";
         out.write(request.getBytes(StandardCharsets.US_ASCII));
@@ -1238,7 +1224,7 @@ public class MainActivity extends Activity {
             HttpURLConnection conn = (HttpURLConnection) new URL(text).openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
-            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.19");
+            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.20");
             try (InputStream in = conn.getInputStream()) {
                 text = new String(readAll(in), StandardCharsets.UTF_8);
             }
@@ -1420,9 +1406,8 @@ public class MainActivity extends Activity {
             return "";
         }
         StringBuilder text = new StringBuilder();
-        Config config = readConfig();
         for (Result r : selected) {
-            text.append(formatCopyLine(r, config)).append("\n");
+            text.append(formatCopyLine(r)).append("\n");
         }
         return text.toString().trim();
     }
@@ -1446,14 +1431,12 @@ public class MainActivity extends Activity {
         return selected;
     }
 
-    private String formatCopyLine(Result r, Config config) {
+    private String formatCopyLine(Result r) {
         StringBuilder line = new StringBuilder();
         line.append(r.address()).append("#");
-        if (!config.hashPrefix.isEmpty()) line.append(config.hashPrefix).append(" ");
         line.append(regionName(r.region))
                 .append(" ")
                 .append(String.format(Locale.US, "%.2fms", r.tcpMs));
-        if (!config.lineSuffix.isEmpty()) line.append(" ").append(config.lineSuffix);
         return line.toString().trim();
     }
 
@@ -2109,7 +2092,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setRequestProperty("Authorization", "Bearer " + textspaceToken());
         conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.19");
+        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.20");
         if (body != null) {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
@@ -2425,8 +2408,6 @@ public class MainActivity extends Activity {
         String uuid;
         String proxyip;
         String realUrl;
-        String hashPrefix;
-        String lineSuffix;
         int timeoutMs;
         int concurrency;
         int candidates;
