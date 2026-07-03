@@ -77,8 +77,9 @@ public class MainActivity extends Activity {
     private static final int MUTED = Color.rgb(100, 116, 139);
     private static final int MIN_REAL_BYTES = 64 * 1024;
     private static final int BODY_SNIPPET_BYTES = 96;
-    private static final String DEFAULT_REAL_URL = "http://cachefly.cachefly.net/100mb.test";
+    private static final String DEFAULT_REAL_URL = "http://speedtest.tele2.net/10MB.zip";
     private static final String OLD_REAL_URL = "http://cachefly.cachefly.net/10mb.test";
+    private static final String BAD_REAL_URL = "http://cachefly.cachefly.net/100mb.test";
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final SecureRandom random = new SecureRandom();
@@ -166,7 +167,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("CF 手机优选 v1.6");
+        title.setText("CF 手机优选 v1.7");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(TEXT);
@@ -706,10 +707,15 @@ public class MainActivity extends Activity {
 
     private String prefRealUrl() {
         String value = prefs.getString("realUrl", DEFAULT_REAL_URL);
-        if (value == null || value.trim().isEmpty() || OLD_REAL_URL.equals(value.trim())) {
+        if (value == null || value.trim().isEmpty() || isBadRealUrl(value.trim())) {
             return DEFAULT_REAL_URL;
         }
         return value;
+    }
+
+    private boolean isBadRealUrl(String value) {
+        String lower = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+        return OLD_REAL_URL.equals(lower) || BAD_REAL_URL.equals(lower);
     }
 
     private List<Result> runTcpScan(List<Target> targets, Config config) throws InterruptedException {
@@ -864,7 +870,7 @@ public class MainActivity extends Activity {
                     + "Connection: Upgrade\r\n"
                     + "Sec-WebSocket-Key: " + key + "\r\n"
                     + "Sec-WebSocket-Version: 13\r\n"
-                    + "User-Agent: CFMobileOptimizer/1.6\r\n\r\n";
+                    + "User-Agent: CFMobileOptimizer/1.7\r\n\r\n";
             out.write(request.getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
@@ -984,7 +990,7 @@ public class MainActivity extends Activity {
         String path = target.getFile().isEmpty() ? "/" : target.getFile();
         String request = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: " + host + "\r\n"
-                + "User-Agent: CFMobileOptimizer/1.6\r\n"
+                + "User-Agent: CFMobileOptimizer/1.7\r\n"
                 + "Accept: */*\r\n"
                 + "Connection: close\r\n\r\n";
         out.write(request.getBytes(StandardCharsets.US_ASCII));
@@ -997,7 +1003,7 @@ public class MainActivity extends Activity {
             HttpURLConnection conn = (HttpURLConnection) new URL(text).openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
-            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.6");
+            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.7");
             try (InputStream in = conn.getInputStream()) {
                 text = new String(readAll(in), StandardCharsets.UTF_8);
             }
@@ -1513,7 +1519,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setRequestProperty("Authorization", "Bearer " + textspaceToken());
         conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.6");
+        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.7");
         if (body != null) {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
