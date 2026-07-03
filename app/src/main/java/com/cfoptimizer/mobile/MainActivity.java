@@ -112,9 +112,6 @@ public class MainActivity extends Activity {
     private Spinner textspaceNoteSpinner;
     private CheckBox allRegionCheck;
     private Button startButton;
-    private Button proxyButton;
-    private Button saveResultButton;
-    private Button saveBoundNodesButton;
     private Button shareNoteButton;
     private Button manageNodesButton;
     private ProgressBar progress;
@@ -122,7 +119,6 @@ public class MainActivity extends Activity {
     private TextView resultText;
     private TextView logText;
     private TextView regionSummaryText;
-    private LinearLayout proxyButtonList;
     private Button regionCustomButton;
 
     private volatile boolean running = false;
@@ -162,7 +158,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("CF 手机优选 v1.21");
+        title.setText("CF 手机优选 v1.22");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(TEXT);
@@ -197,7 +193,7 @@ public class MainActivity extends Activity {
         hostEdit = input(basicCard, "SNI / Host 域名", pref("host", "xinnian.us.ci"), 1, false);
         pathEdit = input(basicCard, "WS 路径", pref("path", "/"), 1, false);
         uuidEdit = input(basicCard, "VLESS UUID（不填则只验证 WS 握手）", pref("uuid", ""), 1, false);
-        proxyEdit = input(basicCard, "组合测速 ProxyIP（可留空，只支持一个）", pref("proxyip", ""), 1, false);
+        proxyEdit = input(basicCard, "ProxyIP（可留空，只支持一个）", pref("proxyip", ""), 1, false);
         realUrlEdit = input(basicCard, "真实下载 URL", prefRealUrl(), 1, false);
 
         LinearLayout paramCard = card(root, "测速参数");
@@ -245,28 +241,11 @@ public class MainActivity extends Activity {
         startButton.setOnClickListener(v -> startScan());
         buttons.addView(startButton, new LinearLayout.LayoutParams(0, dp(44), 1));
 
-        proxyButton = button("测速ProxyIP", ORANGE);
-        proxyButton.setOnClickListener(v -> startProxyTest());
-        LinearLayout.LayoutParams proxyLp = new LinearLayout.LayoutParams(0, dp(44), 1);
-        proxyLp.leftMargin = dp(8);
-        buttons.addView(proxyButton, proxyLp);
-
         manageNodesButton = button("节点管理", GREEN);
         manageNodesButton.setOnClickListener(v -> showNodeManager());
         LinearLayout.LayoutParams manageLp = new LinearLayout.LayoutParams(0, dp(44), 1);
         manageLp.leftMargin = dp(8);
         buttons.addView(manageNodesButton, manageLp);
-
-        LinearLayout boundButtons = row(actionCard);
-        saveResultButton = button("保存测速结果", ORANGE);
-        saveResultButton.setOnClickListener(v -> saveScanResultsToTextspace());
-        boundButtons.addView(saveResultButton, new LinearLayout.LayoutParams(0, dp(44), 1));
-
-        saveBoundNodesButton = button("保存绑定节点", BLUE);
-        saveBoundNodesButton.setOnClickListener(v -> saveBoundNodesToTextspace());
-        LinearLayout.LayoutParams saveBoundLp = new LinearLayout.LayoutParams(0, dp(44), 1);
-        saveBoundLp.leftMargin = dp(8);
-        boundButtons.addView(saveBoundNodesButton, saveBoundLp);
 
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(100);
@@ -281,10 +260,6 @@ public class MainActivity extends Activity {
         actionCard.addView(statusText);
 
         LinearLayout resultCard = card(root, "测速结果");
-        proxyButtonList = new LinearLayout(this);
-        proxyButtonList.setOrientation(LinearLayout.VERTICAL);
-        resultCard.addView(proxyButtonList);
-
         resultText = monoText();
         resultCard.addView(resultText);
 
@@ -742,7 +717,6 @@ public class MainActivity extends Activity {
         running = true;
         startButton.setEnabled(false);
         resultText.setText("");
-        proxyButtonList.removeAllViews();
         logText.setText("");
         lastResults = new ArrayList<>();
         progress.setProgress(0);
@@ -754,6 +728,7 @@ public class MainActivity extends Activity {
                 Config config = readConfig();
                 config.runId = runId;
                 saveConfig();
+                selectBestProxyIfAvailable(config);
                 log("配置：真实测速=" + (config.realCheck ? "开启" : "关闭")
                         + " UUID=" + (config.uuid.isEmpty() ? "空" : "已填写")
                         + " Host=" + config.host
@@ -782,7 +757,10 @@ public class MainActivity extends Activity {
                 List<Result> checked = runWsScan(tcpOk, config);
                 checked.sort(this::compareResults);
                 lastResults = checked;
-                ui.post(() -> showResults(checked, config));
+                ui.post(() -> {
+                    showResults(checked, config);
+                    promptSaveBoundNodes();
+                });
             } catch (Exception e) {
                 log("错误: " + e.getMessage());
                 toast("测速失败: " + e.getMessage());
@@ -793,47 +771,50 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private void startProxyTest() {
-        if (running) return;
-        running = true;
-        proxyButton.setEnabled(false);
-        resultText.setText("");
-        proxyButtonList.removeAllViews();
-        lastProxyResults = new ArrayList<>();
-        progress.setProgress(0);
+    private void selectBestProxyIfAvailable(Config config) throws Exception {
+        String source = proxySourceEdit.getText().toString().trim();
+        if (source.isEmpty()) {
+            lastProxyResults = new ArrayList<>();
+            return;
+        }
         status("正在测速 ProxyIP");
-        int runId = beginProgressRun();
+        List<Target> proxies = loadTargets(source, config.regions, true);
+        if (proxies.isEmpty()) {
+            log("ProxyIP 数据源没有解析到符合区域的地址，继续使用当前 ProxyIP");
+            lastProxyResults = new ArrayList<>();
+            return;
+        }
+        if (proxies.size() > config.candidates) {
+            proxies = evenSample(proxies, config.candidates);
+        }
+        log("解析 ProxyIP " + proxies.size() + " 条");
+        List<ProxyResult> results = runProxyTcpScan(proxies, config);
+        results.sort((a, b) -> {
+            int ok = Integer.compare(b.successes, a.successes);
+            if (ok != 0) return ok;
+            return Double.compare(a.bestMs, b.bestMs);
+        });
+        lastProxyResults = results;
 
-        new Thread(() -> {
-            try {
-                Config config = readConfig();
-                config.runId = runId;
-                saveConfig();
-                List<Target> proxies = loadTargets(proxySourceEdit.getText().toString(), config.regions, true);
-                if (proxies.isEmpty()) {
-                    toast("没有解析到 ProxyIP");
-                    return;
-                }
-                if (proxies.size() > config.candidates) {
-                    proxies = evenSample(proxies, config.candidates);
-                }
-                log("解析 ProxyIP " + proxies.size() + " 条");
-                List<ProxyResult> results = runProxyTcpScan(proxies, config);
-                results.sort((a, b) -> {
-                    int ok = Integer.compare(b.successes, a.successes);
-                    if (ok != 0) return ok;
-                    return Double.compare(a.bestMs, b.bestMs);
-                });
-                lastProxyResults = results;
-                ui.post(() -> showProxyResults(results, config));
-            } catch (Exception e) {
-                log("ProxyIP 错误: " + e.getMessage());
-                toast("ProxyIP 测速失败: " + e.getMessage());
-            } finally {
-                running = false;
-                ui.post(() -> proxyButton.setEnabled(true));
-            }
-        }).start();
+        ProxyResult best = firstUsableProxy(results);
+        if (best == null) {
+            log("ProxyIP 没有可连接结果，继续使用当前 ProxyIP");
+            return;
+        }
+        String bestAddress = best.address();
+        config.proxyip = bestAddress;
+        prefs.edit().putString("proxyip", bestAddress).apply();
+        ui.post(() -> proxyEdit.setText(bestAddress));
+        log("已自动选用 ProxyIP 第一名：" + bestAddress
+                + " 成功" + best.successes + "/" + config.repeats
+                + " " + String.format(Locale.US, "%.2fms", best.bestMs));
+    }
+
+    private ProxyResult firstUsableProxy(List<ProxyResult> results) {
+        for (ProxyResult result : results) {
+            if (result.successes > 0) return result;
+        }
+        return null;
     }
 
     private Config readConfig() {
@@ -1081,7 +1062,7 @@ public class MainActivity extends Activity {
                     + "Connection: Upgrade\r\n"
                     + "Sec-WebSocket-Key: " + key + "\r\n"
                     + "Sec-WebSocket-Version: 13\r\n"
-                    + "User-Agent: CFMobileOptimizer/1.21\r\n\r\n";
+                    + "User-Agent: CFMobileOptimizer/1.22\r\n\r\n";
             out.write(request.getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
@@ -1201,7 +1182,7 @@ public class MainActivity extends Activity {
         String path = target.getFile().isEmpty() ? "/" : target.getFile();
         String request = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: " + host + "\r\n"
-                + "User-Agent: CFMobileOptimizer/1.21\r\n"
+                + "User-Agent: CFMobileOptimizer/1.22\r\n"
                 + "Accept: */*\r\n"
                 + "Connection: close\r\n\r\n";
         out.write(request.getBytes(StandardCharsets.US_ASCII));
@@ -1214,7 +1195,7 @@ public class MainActivity extends Activity {
             HttpURLConnection conn = (HttpURLConnection) new URL(text).openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
-            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.21");
+            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.22");
             try (InputStream in = conn.getInputStream()) {
                 text = new String(readAll(in), StandardCharsets.UTF_8);
             }
@@ -1323,8 +1304,8 @@ public class MainActivity extends Activity {
     }
 
     private void showResults(List<Result> results, Config config) {
-        proxyButtonList.removeAllViews();
         StringBuilder out = new StringBuilder();
+        appendProxyResults(out, config);
         int ws = 0;
         int real = 0;
         int fast = 0;
@@ -1358,28 +1339,28 @@ public class MainActivity extends Activity {
     }
 
     private void showProxyResults(List<ProxyResult> results, Config config) {
-        proxyButtonList.removeAllViews();
         StringBuilder out = new StringBuilder();
-        int limit = Math.min(10, results.size());
-        for (int i = 0; i < limit; i++) {
-            ProxyResult r = results.get(i);
-            String line = (i + 1) + ". " + r.address()
-                    + " 成功" + r.successes + "/" + config.repeats
-                    + " " + (r.bestMs > 0 ? String.format(Locale.US, "%.2fms", r.bestMs) : "不可连")
-                    + (r.error.isEmpty() ? "" : " " + r.error);
-            out.append(line).append("\n");
-
-            String copyLabel = i == 0 ? "复制第一名  " : "复制第" + (i + 1) + "名  ";
-            Button copy = button(copyLabel + r.address(), GREEN);
-            final String value = r.address();
-            copy.setOnClickListener(v -> copyText("proxyip", value, "已复制 " + value));
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(42));
-            lp.topMargin = dp(6);
-            proxyButtonList.addView(copy, lp);
-        }
+        appendProxyResults(out, config);
         resultText.setText(out.toString());
+        int limit = Math.min(10, results.size());
         status("ProxyIP 完成：共 " + results.size() + " 条，显示前 " + limit);
         progress.setProgress(100);
+    }
+
+    private void appendProxyResults(StringBuilder out, Config config) {
+        if (lastProxyResults.isEmpty()) return;
+        out.append("ProxyIP 排名\n");
+        int limit = Math.min(10, lastProxyResults.size());
+        for (int i = 0; i < limit; i++) {
+            ProxyResult r = lastProxyResults.get(i);
+            out.append(i + 1).append(". ").append(r.address())
+                    .append(" 成功").append(r.successes).append("/").append(config.repeats)
+                    .append(" ")
+                    .append(r.bestMs > 0 ? String.format(Locale.US, "%.2fms", r.bestMs) : "不可连");
+            if (!r.error.isEmpty()) out.append(" ").append(r.error);
+            out.append("\n");
+        }
+        out.append("\n");
     }
 
     private void copyResults() {
@@ -1505,17 +1486,21 @@ public class MainActivity extends Activity {
         Toast.makeText(this, toast, Toast.LENGTH_SHORT).show();
     }
 
-    private void saveScanResultsToTextspace() {
-        String text = buildCopyResults();
-        if (text.isEmpty()) {
-            Toast.makeText(this, "没有可保存的测速结果", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        textspaceContentEdit.setText(text);
-        saveTextspaceNote(false);
+    private void promptSaveBoundNodes() {
+        String title = textspaceTitleEdit.getText().toString().trim();
+        if (title.isEmpty() && currentNote != null) title = currentNote.title;
+        if (title == null || title.trim().isEmpty()) title = "CF 手机优选结果";
+        String message = "当前文件：" + title + "\n\n保存本次生成的绑定节点？";
+        new AlertDialog.Builder(this)
+                .setTitle("保存绑定节点")
+                .setMessage(message)
+                .setNegativeButton("覆盖保存", (dialog, which) -> saveBoundNodesToTextspace(false))
+                .setPositiveButton("追加保存", (dialog, which) -> saveBoundNodesToTextspace(true))
+                .setNeutralButton("取消", null)
+                .show();
     }
 
-    private void saveBoundNodesToTextspace() {
+    private void saveBoundNodesToTextspace(boolean append) {
         try {
             String text = buildEdgetunnelBoundNodes();
             if (text.isEmpty()) {
@@ -1525,8 +1510,12 @@ public class MainActivity extends Activity {
             if (textspaceTitleEdit.getText().toString().trim().isEmpty()) {
                 textspaceTitleEdit.setText("Edgetunnel 绑定节点");
             }
-            String existing = normalizeEditableSubscription(textspaceContentEdit.getText().toString());
-            textspaceContentEdit.setText(mergeLines(existing, text));
+            if (append) {
+                String existing = normalizeEditableSubscription(textspaceContentEdit.getText().toString());
+                textspaceContentEdit.setText(mergeLines(existing, text));
+            } else {
+                textspaceContentEdit.setText(text);
+            }
             saveTextspaceNote(false);
         } catch (Exception e) {
             Toast.makeText(this, e.getMessage(), Toast.LENGTH_SHORT).show();
@@ -1995,8 +1984,6 @@ public class MainActivity extends Activity {
     }
 
     private void setTextspaceButtons(boolean enabled) {
-        saveResultButton.setEnabled(enabled);
-        saveBoundNodesButton.setEnabled(enabled);
         shareNoteButton.setEnabled(enabled);
         manageNodesButton.setEnabled(enabled);
     }
@@ -2070,7 +2057,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setRequestProperty("Authorization", "Bearer " + textspaceToken());
         conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.21");
+        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.22");
         if (body != null) {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
