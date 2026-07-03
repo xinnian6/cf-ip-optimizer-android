@@ -119,9 +119,7 @@ public class MainActivity extends Activity {
     private Button copyProxyTopButton;
     private Button saveResultButton;
     private Button saveBoundNodesButton;
-    private Button saveNoteButton;
     private Button shareNoteButton;
-    private Button deleteNoteButton;
     private Button manageNodesButton;
     private ProgressBar progress;
     private TextView statusText;
@@ -169,7 +167,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("CF 手机优选 v1.18");
+        title.setText("CF 手机优选 v1.19");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(TEXT);
@@ -228,10 +226,40 @@ public class MainActivity extends Activity {
         minSpeedEdit = smallInput(row3, "最低 Mbps", pref("minSpeed", "80"));
 
         LinearLayout actionCard = card(root, "操作");
+        TextView noteLabel = label("保存目标（选择后自动读取）");
+        actionCard.addView(noteLabel);
+        LinearLayout noteRow = row(actionCard);
+        textspaceNoteSpinner = new Spinner(this);
+        textspaceNoteSpinner.setBackground(fieldBg());
+        noteRow.addView(textspaceNoteSpinner, new LinearLayout.LayoutParams(0, dp(44), 1));
+        shareNoteButton = button("分享", GREEN);
+        shareNoteButton.setOnClickListener(v -> saveTextspaceNote(true));
+        LinearLayout.LayoutParams shareTopLp = new LinearLayout.LayoutParams(dp(66), dp(44));
+        shareTopLp.leftMargin = dp(8);
+        noteRow.addView(shareNoteButton, shareTopLp);
+        textspaceNoteSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                if (loadingTextspaceSpinner || position < 0 || position >= textspaceNotes.size()) return;
+                NoteSummary note = textspaceNotes.get(position);
+                if (currentNote != null && note.id.equals(currentNote.id)) return;
+                loadTextspaceNoteById(note.id);
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
+
         LinearLayout buttons = row(actionCard);
         startButton = button("开始测速", BLUE);
         startButton.setOnClickListener(v -> startScan());
         buttons.addView(startButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(46)));
+
+        LinearLayout manageRow = row(actionCard);
+        manageNodesButton = button("节点管理", GREEN);
+        manageNodesButton.setOnClickListener(v -> showNodeManager());
+        manageRow.addView(manageNodesButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
 
         LinearLayout boundButtons = row(actionCard);
         saveResultButton = button("保存测速结果", ORANGE);
@@ -280,47 +308,7 @@ public class MainActivity extends Activity {
         resultText = monoText();
         resultCard.addView(resultText);
 
-        LinearLayout publishCard = card(root, "结果发布");
-        TextView noteLabel = label("保存目标（选择后自动读取）");
-        publishCard.addView(noteLabel);
-        LinearLayout noteRow = row(publishCard);
-        textspaceNoteSpinner = new Spinner(this);
-        textspaceNoteSpinner.setBackground(fieldBg());
-        noteRow.addView(textspaceNoteSpinner, new LinearLayout.LayoutParams(0, dp(44), 1));
-        shareNoteButton = button("分享", GREEN);
-        shareNoteButton.setOnClickListener(v -> saveTextspaceNote(true));
-        LinearLayout.LayoutParams shareTopLp = new LinearLayout.LayoutParams(dp(66), dp(44));
-        shareTopLp.leftMargin = dp(8);
-        noteRow.addView(shareNoteButton, shareTopLp);
-        textspaceNoteSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                if (loadingTextspaceSpinner || position < 0 || position >= textspaceNotes.size()) return;
-                NoteSummary note = textspaceNotes.get(position);
-                if (currentNote != null && note.id.equals(currentNote.id)) return;
-                loadTextspaceNoteById(note.id);
-            }
-
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {
-            }
-        });
-
-        LinearLayout pubRow1 = row(publishCard);
-        saveNoteButton = button("保存文本", GREEN);
-        saveNoteButton.setOnClickListener(v -> saveTextspaceNote(false));
-        pubRow1.addView(saveNoteButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
-
-        LinearLayout pubRow2 = row(publishCard);
-        manageNodesButton = button("节点管理", GREEN);
-        manageNodesButton.setOnClickListener(v -> showNodeManager());
-        pubRow2.addView(manageNodesButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
-        LinearLayout pubRow3 = row(publishCard);
-        deleteNoteButton = button("删除文本", Color.rgb(220, 38, 38));
-        deleteNoteButton.setOnClickListener(v -> confirmDeleteTextspaceNote());
-        pubRow3.addView(deleteNoteButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
-
-        textspaceContentEdit = bareInput(publishCard, pref("textspaceContent", ""), 8, false);
+        textspaceContentEdit = bareInput(actionCard, pref("textspaceContent", ""), 8, false);
         textspaceContentEdit.setVisibility(View.GONE);
 
         LinearLayout logCard = card(root, "运行日志");
@@ -1117,7 +1105,7 @@ public class MainActivity extends Activity {
                     + "Connection: Upgrade\r\n"
                     + "Sec-WebSocket-Key: " + key + "\r\n"
                     + "Sec-WebSocket-Version: 13\r\n"
-                    + "User-Agent: CFMobileOptimizer/1.18\r\n\r\n";
+                    + "User-Agent: CFMobileOptimizer/1.19\r\n\r\n";
             out.write(request.getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
@@ -1237,7 +1225,7 @@ public class MainActivity extends Activity {
         String path = target.getFile().isEmpty() ? "/" : target.getFile();
         String request = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: " + host + "\r\n"
-                + "User-Agent: CFMobileOptimizer/1.18\r\n"
+                + "User-Agent: CFMobileOptimizer/1.19\r\n"
                 + "Accept: */*\r\n"
                 + "Connection: close\r\n\r\n";
         out.write(request.getBytes(StandardCharsets.US_ASCII));
@@ -1250,7 +1238,7 @@ public class MainActivity extends Activity {
             HttpURLConnection conn = (HttpURLConnection) new URL(text).openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
-            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.18");
+            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.19");
             try (InputStream in = conn.getInputStream()) {
                 text = new String(readAll(in), StandardCharsets.UTF_8);
             }
@@ -1990,7 +1978,7 @@ public class MainActivity extends Activity {
         if (textspaceRunning) return;
         textspaceRunning = true;
         setTextspaceButtons(false);
-        status(share ? "正在保存并复制分享 URL" : "正在保存文本");
+        status(share ? "正在保存并复制分享 URL" : "正在同步 TextSpace");
 
         new Thread(() -> {
             try {
@@ -2033,7 +2021,7 @@ public class MainActivity extends Activity {
                     if (!finalShareUrl.isEmpty()) {
                         copyText("textspace-share-url", finalShareUrl, "分享 URL 已复制");
                     }
-                    status(share ? "已复制分享 URL：" + finalShareUrl : "已保存文本：" + finalTitle);
+                    status(share ? "已复制分享 URL：" + finalShareUrl : "已同步 TextSpace：" + finalTitle);
                 });
             } catch (Exception e) {
                 log("TextSpace 保存失败: " + e.getMessage());
@@ -2045,60 +2033,11 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private void confirmDeleteTextspaceNote() {
-        if (currentNote == null || currentNote.id.isEmpty()) {
-            Toast.makeText(this, "当前没有选中文本", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        String title = currentNote.title == null || currentNote.title.isEmpty() ? "当前文本" : currentNote.title;
-        new AlertDialog.Builder(this)
-                .setTitle("删除文本")
-                .setMessage("确定删除「" + title + "」吗？")
-                .setNegativeButton("取消", null)
-                .setPositiveButton("删除", (dialog, which) -> deleteTextspaceNote())
-                .show();
-    }
-
-    private void deleteTextspaceNote() {
-        if (currentNote == null || currentNote.id.isEmpty() || textspaceRunning) return;
-        textspaceRunning = true;
-        setTextspaceButtons(false);
-        String deleteId = currentNote.id;
-        status("正在删除文本");
-
-        new Thread(() -> {
-            try {
-                textspaceRequest("DELETE", "/api/notes/" + urlPart(deleteId), null);
-                ui.post(() -> {
-                    removeNoteSummary(deleteId);
-                    currentNote = null;
-                    textspaceTitleEdit.setText("");
-                    textspaceContentEdit.setText("");
-                    updateTextspaceSpinner();
-                    status("已删除文本");
-                    Toast.makeText(this, "已删除文本", Toast.LENGTH_SHORT).show();
-                    if (!textspaceNotes.isEmpty()) {
-                        String nextId = textspaceNotes.get(0).id;
-                        ui.postDelayed(() -> loadTextspaceNoteById(nextId), 250);
-                    }
-                });
-            } catch (Exception e) {
-                log("TextSpace 删除失败: " + e.getMessage());
-                toast("删除失败: " + e.getMessage());
-            } finally {
-                textspaceRunning = false;
-                ui.post(() -> setTextspaceButtons(true));
-            }
-        }).start();
-    }
-
     private void setTextspaceButtons(boolean enabled) {
         saveResultButton.setEnabled(enabled);
         saveBoundNodesButton.setEnabled(enabled);
-        saveNoteButton.setEnabled(enabled);
         shareNoteButton.setEnabled(enabled);
         manageNodesButton.setEnabled(enabled);
-        deleteNoteButton.setEnabled(enabled);
     }
 
     private void updateTextspaceSpinner() {
@@ -2162,14 +2101,6 @@ public class MainActivity extends Activity {
         textspaceNotes.add(0, summary);
     }
 
-    private void removeNoteSummary(String id) {
-        List<NoteSummary> next = new ArrayList<>();
-        for (NoteSummary note : textspaceNotes) {
-            if (!id.equals(note.id)) next.add(note);
-        }
-        textspaceNotes = next;
-    }
-
     private String textspaceRequest(String method, String path, String body) throws Exception {
         URL url = new URL(textspaceBaseUrl() + path);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -2178,7 +2109,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setRequestProperty("Authorization", "Bearer " + textspaceToken());
         conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.18");
+        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.19");
         if (body != null) {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
