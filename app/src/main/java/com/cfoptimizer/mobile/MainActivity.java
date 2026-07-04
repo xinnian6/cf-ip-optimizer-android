@@ -124,6 +124,7 @@ public class MainActivity extends Activity {
     private EditText textspaceContentEdit;
     private Spinner textspaceNoteSpinner;
     private CheckBox allRegionCheck;
+    private CheckBox autoOverwriteSaveCheck;
     private Button startButton;
     private Button newNoteButton;
     private Button renameNoteButton;
@@ -182,7 +183,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("CF优选 v1.27");
+        title.setText("CF优选 v1.28");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(TEXT);
@@ -280,6 +281,17 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams shareTopLp = new LinearLayout.LayoutParams(0, dp(40), 1);
         shareTopLp.leftMargin = dp(8);
         noteManageRow.addView(shareNoteButton, shareTopLp);
+
+        autoOverwriteSaveCheck = new CheckBox(this);
+        autoOverwriteSaveCheck.setText("自动覆盖保存：测速完成后不弹窗，直接覆盖当前 TextSpace 文本");
+        autoOverwriteSaveCheck.setTextSize(13);
+        autoOverwriteSaveCheck.setTextColor(TEXT);
+        autoOverwriteSaveCheck.setChecked(prefs.getBoolean("autoOverwriteSave", false));
+        autoOverwriteSaveCheck.setOnCheckedChangeListener((buttonView, isChecked) ->
+                prefs.edit().putBoolean("autoOverwriteSave", isChecked).apply());
+        LinearLayout.LayoutParams autoSaveLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        autoSaveLp.topMargin = dp(8);
+        actionCard.addView(autoOverwriteSaveCheck, autoSaveLp);
 
         LinearLayout buttons = row(actionCard);
         startButton = button("开始测速", BLUE);
@@ -808,7 +820,7 @@ public class MainActivity extends Activity {
                 lastResults = checked;
                 ui.post(() -> {
                     showResults(checked, config);
-                    promptSaveBoundNodes();
+                    handleBoundNodesAfterScan();
                 });
             } catch (Exception e) {
                 log("错误: " + e.getMessage());
@@ -938,6 +950,7 @@ public class MainActivity extends Activity {
                 .putString("repeats", repeatsEdit.getText().toString())
                 .putString("downloadMb", downloadMbEdit.getText().toString())
                 .putString("minSpeed", minSpeedEdit.getText().toString())
+                .putBoolean("autoOverwriteSave", autoOverwriteSaveCheck != null && autoOverwriteSaveCheck.isChecked())
                 .putBoolean("regionAllV2", allRegionCheck != null && allRegionCheck.isChecked())
                 .putString("regionSelectedV2", join(new ArrayList<>(selectedRegionCodes), ","))
                 .putString("regionCustomItemsV2", customRegionPrefsValue());
@@ -1250,7 +1263,7 @@ public class MainActivity extends Activity {
                     + "Connection: Upgrade\r\n"
                     + "Sec-WebSocket-Key: " + key + "\r\n"
                     + "Sec-WebSocket-Version: 13\r\n"
-                    + "User-Agent: CFMobileOptimizer/1.27\r\n\r\n";
+                    + "User-Agent: CFMobileOptimizer/1.28\r\n\r\n";
             out.write(request.getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
@@ -1370,7 +1383,7 @@ public class MainActivity extends Activity {
         String path = target.getFile().isEmpty() ? "/" : target.getFile();
         String request = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: " + host + "\r\n"
-                + "User-Agent: CFMobileOptimizer/1.27\r\n"
+                + "User-Agent: CFMobileOptimizer/1.28\r\n"
                 + "Accept: */*\r\n"
                 + "Connection: close\r\n\r\n";
         out.write(request.getBytes(StandardCharsets.US_ASCII));
@@ -1383,7 +1396,7 @@ public class MainActivity extends Activity {
             HttpURLConnection conn = (HttpURLConnection) new URL(text).openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
-            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.27");
+            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.28");
             try (InputStream in = conn.getInputStream()) {
                 text = new String(readAll(in), StandardCharsets.UTF_8);
             }
@@ -1756,6 +1769,14 @@ public class MainActivity extends Activity {
             if (value.equalsIgnoreCase(token.trim())) return;
         }
         proxySourceEdit.setText(existing.trim().isEmpty() ? value : existing.trim() + "\n" + value);
+    }
+
+    private void handleBoundNodesAfterScan() {
+        if (autoOverwriteSaveCheck != null && autoOverwriteSaveCheck.isChecked()) {
+            saveBoundNodesToTextspace(false);
+        } else {
+            promptSaveBoundNodes();
+        }
     }
 
     private void promptSaveBoundNodes() {
@@ -2451,7 +2472,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setRequestProperty("Authorization", "Bearer " + textspaceToken());
         conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.27");
+        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.28");
         if (body != null) {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
