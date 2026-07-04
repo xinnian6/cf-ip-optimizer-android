@@ -1,11 +1,18 @@
 package com.cfoptimizer.mobile;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -96,6 +103,8 @@ public class MainActivity extends Activity {
     private static final String SECURE_KEY_ALIAS = "cf_optimizer_secure_prefs_v1";
     private static final String SECURE_PREFIX = "secure_";
     private static final String ENC_PREFIX = "enc:v1:";
+    private static final String SCAN_CHANNEL_ID = "cf_optimizer_scan";
+    private static final int SCAN_NOTIFICATION_ID = 101;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final SecureRandom random = new SecureRandom();
@@ -147,6 +156,8 @@ public class MainActivity extends Activity {
     private final List<RegionItem> regionItems = new ArrayList<>();
     private final Set<String> selectedRegionCodes = new LinkedHashSet<>();
     private NoteDetail currentNote;
+    private CheckBox autoRunOnLaunchCheck;
+    private boolean autoRunStarted = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -154,6 +165,8 @@ public class MainActivity extends Activity {
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         setupWindow();
         buildUi();
+        ensureNotificationPermission();
+        ensureNotificationChannel();
     }
 
     @Override
@@ -183,7 +196,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("CF优选 v1.28");
+        title.setText("CF优选 v1.29");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(TEXT);
@@ -293,6 +306,17 @@ public class MainActivity extends Activity {
         autoSaveLp.topMargin = dp(8);
         actionCard.addView(autoOverwriteSaveCheck, autoSaveLp);
 
+        autoRunOnLaunchCheck = new CheckBox(this);
+        autoRunOnLaunchCheck.setText("启动后自动测速：打开 App 后自动执行并显示通知栏进度");
+        autoRunOnLaunchCheck.setTextSize(13);
+        autoRunOnLaunchCheck.setTextColor(TEXT);
+        autoRunOnLaunchCheck.setChecked(prefs.getBoolean("autoRunOnLaunch", false));
+        autoRunOnLaunchCheck.setOnCheckedChangeListener((buttonView, isChecked) ->
+                prefs.edit().putBoolean("autoRunOnLaunch", isChecked).apply());
+        LinearLayout.LayoutParams autoRunLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        autoRunLp.topMargin = dp(4);
+        actionCard.addView(autoRunOnLaunchCheck, autoRunLp);
+
         LinearLayout buttons = row(actionCard);
         startButton = button("开始测速", BLUE);
         startButton.setOnClickListener(v -> startScan());
@@ -335,6 +359,7 @@ public class MainActivity extends Activity {
             } else {
                 updateTextspaceSpinner();
             }
+            ui.postDelayed(this::maybeAutoRunOnLaunch, 1500);
         }, 300);
     }
 
@@ -779,6 +804,7 @@ public class MainActivity extends Activity {
         lastResults = new ArrayList<>();
         progress.setProgress(0);
         status("正在准备");
+        showScanNotification("正在准备测速", 0, true);
         int runId = beginProgressRun();
 
         new Thread(() -> {
@@ -820,9 +846,11 @@ public class MainActivity extends Activity {
                 lastResults = checked;
                 ui.post(() -> {
                     showResults(checked, config);
+                    showScanNotification("测速完成，正在处理保存", 100, true);
                     handleBoundNodesAfterScan();
                 });
             } catch (Exception e) {
+                showScanNotification("测速失败：" + e.getMessage(), 100, false);
                 log("错误: " + e.getMessage());
                 toast("测速失败: " + e.getMessage());
             } finally {
@@ -951,6 +979,7 @@ public class MainActivity extends Activity {
                 .putString("downloadMb", downloadMbEdit.getText().toString())
                 .putString("minSpeed", minSpeedEdit.getText().toString())
                 .putBoolean("autoOverwriteSave", autoOverwriteSaveCheck != null && autoOverwriteSaveCheck.isChecked())
+                .putBoolean("autoRunOnLaunch", autoRunOnLaunchCheck != null && autoRunOnLaunchCheck.isChecked())
                 .putBoolean("regionAllV2", allRegionCheck != null && allRegionCheck.isChecked())
                 .putString("regionSelectedV2", join(new ArrayList<>(selectedRegionCodes), ","))
                 .putString("regionCustomItemsV2", customRegionPrefsValue());
@@ -1263,7 +1292,7 @@ public class MainActivity extends Activity {
                     + "Connection: Upgrade\r\n"
                     + "Sec-WebSocket-Key: " + key + "\r\n"
                     + "Sec-WebSocket-Version: 13\r\n"
-                    + "User-Agent: CFMobileOptimizer/1.28\r\n\r\n";
+                    + "User-Agent: CFMobileOptimizer/1.29\r\n\r\n";
             out.write(request.getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
@@ -1383,7 +1412,7 @@ public class MainActivity extends Activity {
         String path = target.getFile().isEmpty() ? "/" : target.getFile();
         String request = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: " + host + "\r\n"
-                + "User-Agent: CFMobileOptimizer/1.28\r\n"
+                + "User-Agent: CFMobileOptimizer/1.29\r\n"
                 + "Accept: */*\r\n"
                 + "Connection: close\r\n\r\n";
         out.write(request.getBytes(StandardCharsets.US_ASCII));
@@ -1396,7 +1425,7 @@ public class MainActivity extends Activity {
             HttpURLConnection conn = (HttpURLConnection) new URL(text).openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
-            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.28");
+            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.29");
             try (InputStream in = conn.getInputStream()) {
                 text = new String(readAll(in), StandardCharsets.UTF_8);
             }
@@ -1773,8 +1802,10 @@ public class MainActivity extends Activity {
 
     private void handleBoundNodesAfterScan() {
         if (autoOverwriteSaveCheck != null && autoOverwriteSaveCheck.isChecked()) {
+            showScanNotification("测速完成，正在自动覆盖保存", 100, true);
             saveBoundNodesToTextspace(false);
         } else {
+            showScanNotification("测速完成，等待选择保存方式", 100, false);
             promptSaveBoundNodes();
         }
     }
@@ -2375,6 +2406,9 @@ public class MainActivity extends Activity {
                     if (!finalSuccessToast.isEmpty()) {
                         Toast.makeText(this, finalSuccessToast, Toast.LENGTH_SHORT).show();
                     }
+                    if (!share) {
+                        showScanNotification("已保存到 TextSpace：" + finalTitle, 100, false);
+                    }
                     status(share ? "已复制分享 URL：" + finalShareUrl : "已同步 TextSpace：" + finalTitle);
                 });
             } catch (Exception e) {
@@ -2472,7 +2506,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setRequestProperty("Authorization", "Bearer " + textspaceToken());
         conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.28");
+        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.29");
         if (body != null) {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
@@ -2694,12 +2728,69 @@ public class MainActivity extends Activity {
         ui.post(() -> {
             if (runId != activeRunId) return;
             progress.setProgress(percent);
-            statusText.setText(stage + " " + safeDone + "/" + total);
+            String text = stage + " " + safeDone + "/" + total;
+            statusText.setText(text);
+            showScanNotification(text, percent, true);
         });
     }
 
     private void status(String text) {
         ui.post(() -> statusText.setText(text));
+    }
+
+    private void maybeAutoRunOnLaunch() {
+        if (autoRunStarted || running) return;
+        if (autoRunOnLaunchCheck == null || !autoRunOnLaunchCheck.isChecked()) return;
+        autoRunStarted = true;
+        startScan();
+    }
+
+    private void ensureNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1002);
+        }
+    }
+
+    private void ensureNotificationChannel() {
+        NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager == null) return;
+        NotificationChannel channel = new NotificationChannel(
+                SCAN_CHANNEL_ID,
+                "CF优选测速",
+                NotificationManager.IMPORTANCE_LOW);
+        channel.setDescription("显示 CF优选 测速进度和保存状态");
+        manager.createNotificationChannel(channel);
+    }
+
+    private void showScanNotification(String text, int percent, boolean ongoing) {
+        try {
+            if (Build.VERSION.SDK_INT >= 33
+                    && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                return;
+            }
+            ensureNotificationChannel();
+            Intent intent = new Intent(this, MainActivity.class);
+            intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+            if (Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
+            PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent, flags);
+
+            Notification.Builder builder = new Notification.Builder(this, SCAN_CHANNEL_ID)
+                    .setSmallIcon(R.drawable.ic_splash_logo)
+                    .setContentTitle("CF优选")
+                    .setContentText(text == null || text.isEmpty() ? "测速中" : text)
+                    .setContentIntent(pendingIntent)
+                    .setOngoing(ongoing)
+                    .setOnlyAlertOnce(true)
+                    .setShowWhen(false);
+            if (ongoing) {
+                builder.setProgress(100, Math.max(0, Math.min(100, percent)), false);
+            }
+            NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (manager != null) manager.notify(SCAN_NOTIFICATION_ID, builder.build());
+        } catch (Exception ignored) {
+        }
     }
 
     private void log(String text) {
