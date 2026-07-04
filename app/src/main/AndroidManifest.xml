@@ -1,6 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <application
         android:allowBackup="true"
@@ -18,9 +20,13 @@
             </intent-filter>
         </activity>
         <service
+            android:name=".QuickRunService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+        <service
             android:name=".QuickRunTileService"
             android:exported="true"
-            android:icon="@drawable/ic_splash_logo"
+            android:icon="@drawable/ic_tile_cf_boost"
             android:label="CF优选"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>

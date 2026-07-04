@@ -209,7 +209,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("CF优选 v1.30");
+        title.setText("CF优选 v1.31");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(TEXT);
@@ -997,6 +997,7 @@ public class MainActivity extends Activity {
                 .putString("repeats", repeatsEdit.getText().toString())
                 .putString("downloadMb", downloadMbEdit.getText().toString())
                 .putString("minSpeed", minSpeedEdit.getText().toString())
+                .putString("textspaceNoteId", currentNote == null ? "" : currentNote.id)
                 .putBoolean("autoOverwriteSave", autoOverwriteSaveCheck != null && autoOverwriteSaveCheck.isChecked())
                 .putBoolean("autoRunOnLaunch", autoRunOnLaunchCheck != null && autoRunOnLaunchCheck.isChecked())
                 .putBoolean("regionAllV2", allRegionCheck != null && allRegionCheck.isChecked())
@@ -1311,7 +1312,7 @@ public class MainActivity extends Activity {
                     + "Connection: Upgrade\r\n"
                     + "Sec-WebSocket-Key: " + key + "\r\n"
                     + "Sec-WebSocket-Version: 13\r\n"
-                    + "User-Agent: CFMobileOptimizer/1.30\r\n\r\n";
+                    + "User-Agent: CFMobileOptimizer/1.31\r\n\r\n";
             out.write(request.getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
@@ -1431,7 +1432,7 @@ public class MainActivity extends Activity {
         String path = target.getFile().isEmpty() ? "/" : target.getFile();
         String request = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: " + host + "\r\n"
-                + "User-Agent: CFMobileOptimizer/1.30\r\n"
+                + "User-Agent: CFMobileOptimizer/1.31\r\n"
                 + "Accept: */*\r\n"
                 + "Connection: close\r\n\r\n";
         out.write(request.getBytes(StandardCharsets.US_ASCII));
@@ -1444,7 +1445,7 @@ public class MainActivity extends Activity {
             HttpURLConnection conn = (HttpURLConnection) new URL(text).openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
-            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.30");
+            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.31");
             try (InputStream in = conn.getInputStream()) {
                 text = new String(readAll(in), StandardCharsets.UTF_8);
             }
@@ -1940,6 +1941,7 @@ public class MainActivity extends Activity {
                 ui.post(() -> {
                     removeNoteSummary(deleteId);
                     currentNote = null;
+                    prefs.edit().remove("textspaceNoteId").apply();
                     textspaceTitleEdit.setText("");
                     textspaceContentEdit.setText("");
                     updateTextspaceSpinner();
@@ -2401,12 +2403,20 @@ public class MainActivity extends Activity {
                     savedJson = new JSONObject(textspaceRequest("PUT", "/api/notes/" + urlPart(noteId), body.toString()));
                 }
                 currentNote = parseNote(savedJson);
+                prefs.edit()
+                        .putString("textspaceNoteId", currentNote.id)
+                        .putString("textspaceTitle", currentNote.title)
+                        .apply();
 
                 String shareUrl = "";
                 if (share) {
                     if (currentNote.shareToken == null || currentNote.shareToken.trim().isEmpty()) {
                         JSONObject sharedJson = new JSONObject(textspaceRequest("POST", "/api/notes/" + urlPart(currentNote.id) + "/share", "{}"));
                         currentNote = parseNote(sharedJson);
+                        prefs.edit()
+                                .putString("textspaceNoteId", currentNote.id)
+                                .putString("textspaceTitle", currentNote.title)
+                                .apply();
                     }
                     shareUrl = textspaceBaseUrl() + "/sub/" + urlPart(currentNote.shareToken);
                 }
@@ -2529,7 +2539,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setRequestProperty("Authorization", "Bearer " + textspaceToken());
         conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.30");
+        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.31");
         if (body != null) {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
@@ -2823,7 +2833,7 @@ public class MainActivity extends Activity {
             PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent, flags);
 
             Notification.Builder builder = new Notification.Builder(this, SCAN_CHANNEL_ID)
-                    .setSmallIcon(R.drawable.ic_splash_logo)
+                    .setSmallIcon(R.drawable.ic_tile_cf_boost)
                     .setContentTitle("CF优选")
                     .setContentText(text == null || text.isEmpty() ? "测速中" : text)
                     .setContentIntent(pendingIntent)
