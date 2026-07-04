@@ -5,7 +5,7 @@
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
-        android:label="CF手机优选"
+        android:label="CF优选"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="true">
         <activity

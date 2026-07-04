@@ -101,6 +101,7 @@ public class MainActivity extends Activity {
     private final SecureRandom random = new SecureRandom();
     private final AtomicInteger runSeq = new AtomicInteger();
     private volatile int activeRunId = 0;
+    private volatile boolean stopRequested = false;
 
     private SharedPreferences prefs;
     private EditText sourceEdit;
@@ -154,6 +155,14 @@ public class MainActivity extends Activity {
         buildUi();
     }
 
+    @Override
+    protected void onDestroy() {
+        stopRequested = true;
+        activeRunId = runSeq.incrementAndGet();
+        running = false;
+        super.onDestroy();
+    }
+
     private void setupWindow() {
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(Color.WHITE);
@@ -173,7 +182,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("CF 手机优选 v1.26");
+        title.setText("CF优选 v1.27");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(TEXT);
@@ -193,7 +202,7 @@ public class MainActivity extends Activity {
         textspaceTokenEdit = new EditText(this);
         textspaceTokenEdit.setText(securePref("textspaceToken", ""));
         textspaceTitleEdit = new EditText(this);
-        textspaceTitleEdit.setText(pref("textspaceTitle", "CF 手机优选结果"));
+        textspaceTitleEdit.setText(pref("textspaceTitle", "CF优选结果"));
         View.OnFocusChangeListener autoRefreshTextspace = (view, hasFocus) -> {
             if (!hasFocus) {
                 maskTextspaceInput();
@@ -751,6 +760,7 @@ public class MainActivity extends Activity {
     private void startScan() {
         if (running) return;
         running = true;
+        stopRequested = false;
         startButton.setEnabled(false);
         resultText.setText("");
         logText.setText("");
@@ -765,6 +775,7 @@ public class MainActivity extends Activity {
                 config.runId = runId;
                 saveConfig();
                 selectBestProxyIfAvailable(config);
+                if (shouldStop(config)) return;
                 log("配置：真实测速=" + (config.realCheck ? "开启" : "关闭")
                         + " UUID=" + (config.uuid.isEmpty() ? "空" : "已填写")
                         + " Host=" + config.host
@@ -779,6 +790,7 @@ public class MainActivity extends Activity {
                 }
 
                 List<Result> tcpOk = runTcpScan(targets, config);
+                if (shouldStop(config)) return;
                 tcpOk.sort(Comparator.comparingDouble(r -> r.tcpMs));
                 int beforeDelayFilter = tcpOk.size();
                 tcpOk = filterByMaxTcp(tcpOk, config);
@@ -791,6 +803,7 @@ public class MainActivity extends Activity {
                 log("TCP 可连接 " + tcpOk.size() + " 条，进入 WS / 真实测速");
 
                 List<Result> checked = runWsScan(tcpOk, config);
+                if (shouldStop(config)) return;
                 checked.sort(this::compareResults);
                 lastResults = checked;
                 ui.post(() -> {
@@ -805,6 +818,10 @@ public class MainActivity extends Activity {
                 ui.post(() -> startButton.setEnabled(true));
             }
         }).start();
+    }
+
+    private boolean shouldStop(Config config) {
+        return stopRequested || config == null || config.runId != activeRunId;
     }
 
     private void selectBestProxyIfAvailable(Config config) throws Exception {
@@ -1085,6 +1102,7 @@ public class MainActivity extends Activity {
         for (Target target : targets) {
             futures.add(pool.submit(() -> {
                 Result r = new Result(target);
+                if (shouldStop(config)) return r;
                 long start = System.nanoTime();
                 try (Socket socket = new Socket()) {
                     socket.connect(new InetSocketAddress(target.host, target.port), config.timeoutMs);
@@ -1147,6 +1165,7 @@ public class MainActivity extends Activity {
             futures.add(pool.submit(() -> {
                 ProxyResult r = new ProxyResult(proxy);
                 for (int i = 0; i < config.repeats; i++) {
+                    if (shouldStop(config)) return r;
                     long start = System.nanoTime();
                     try (Socket socket = new Socket()) {
                         socket.connect(new InetSocketAddress(proxy.host, proxy.port), config.timeoutMs);
@@ -1183,6 +1202,7 @@ public class MainActivity extends Activity {
             futures.add(pool.submit(() -> {
                 Result r = candidate.copy();
                 for (int i = 0; i < config.repeats; i++) {
+                    if (shouldStop(config)) return r;
                     probeWs(r, config);
                 }
                 r.handshakeOk = r.wsSuccesses >= 1;
@@ -1230,7 +1250,7 @@ public class MainActivity extends Activity {
                     + "Connection: Upgrade\r\n"
                     + "Sec-WebSocket-Key: " + key + "\r\n"
                     + "Sec-WebSocket-Version: 13\r\n"
-                    + "User-Agent: CFMobileOptimizer/1.26\r\n\r\n";
+                    + "User-Agent: CFMobileOptimizer/1.27\r\n\r\n";
             out.write(request.getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
@@ -1350,7 +1370,7 @@ public class MainActivity extends Activity {
         String path = target.getFile().isEmpty() ? "/" : target.getFile();
         String request = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: " + host + "\r\n"
-                + "User-Agent: CFMobileOptimizer/1.26\r\n"
+                + "User-Agent: CFMobileOptimizer/1.27\r\n"
                 + "Accept: */*\r\n"
                 + "Connection: close\r\n\r\n";
         out.write(request.getBytes(StandardCharsets.US_ASCII));
@@ -1363,7 +1383,7 @@ public class MainActivity extends Activity {
             HttpURLConnection conn = (HttpURLConnection) new URL(text).openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
-            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.26");
+            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.27");
             try (InputStream in = conn.getInputStream()) {
                 text = new String(readAll(in), StandardCharsets.UTF_8);
             }
@@ -1741,7 +1761,7 @@ public class MainActivity extends Activity {
     private void promptSaveBoundNodes() {
         String title = textspaceTitleEdit.getText().toString().trim();
         if (title.isEmpty() && currentNote != null) title = currentNote.title;
-        if (title == null || title.trim().isEmpty()) title = "CF 手机优选结果";
+        if (title == null || title.trim().isEmpty()) title = "CF优选结果";
         String message = "当前文件：" + title + "\n\n保存本次生成的绑定节点？";
         new AlertDialog.Builder(this)
                 .setTitle("保存绑定节点")
@@ -1775,14 +1795,14 @@ public class MainActivity extends Activity {
     }
 
     private void promptCreateTextspaceNote() {
-        EditText input = dialogInput("新文本名称", "CF 手机优选结果");
+        EditText input = dialogInput("新文本名称", "CF优选结果");
         new AlertDialog.Builder(this)
                 .setTitle("新建文本")
                 .setView(input)
                 .setNegativeButton("取消", null)
                 .setPositiveButton("新建", (dialog, which) -> {
                     String title = input.getText().toString().trim();
-                    if (title.isEmpty()) title = "CF 手机优选结果";
+                    if (title.isEmpty()) title = "CF优选结果";
                     currentNote = null;
                     textspaceTitleEdit.setText(title);
                     textspaceContentEdit.setText("");
@@ -2295,7 +2315,7 @@ public class MainActivity extends Activity {
                 String noteId = currentNote == null ? "" : currentNote.id;
                 String title = textspaceTitleEdit.getText().toString().trim();
                 String content = normalizeEditableSubscription(textspaceContentEdit.getText().toString());
-                if (title.isEmpty()) title = "CF 手机优选结果";
+                if (title.isEmpty()) title = "CF优选结果";
 
                 JSONObject body = new JSONObject();
                 body.put("title", title);
@@ -2431,7 +2451,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setRequestProperty("Authorization", "Bearer " + textspaceToken());
         conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.26");
+        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.27");
         if (body != null) {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
