@@ -84,6 +84,7 @@ public class MainActivity extends Activity {
     private static final String DEFAULT_REAL_URL = "http://speedtest.tele2.net/10MB.zip";
     private static final String OLD_REAL_URL = "http://cachefly.cachefly.net/10mb.test";
     private static final String BAD_REAL_URL = "http://cachefly.cachefly.net/100mb.test";
+    private static final int NODE_MANAGER_RENDER_LIMIT = 250;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final SecureRandom random = new SecureRandom();
@@ -112,6 +113,9 @@ public class MainActivity extends Activity {
     private Spinner textspaceNoteSpinner;
     private CheckBox allRegionCheck;
     private Button startButton;
+    private Button newNoteButton;
+    private Button renameNoteButton;
+    private Button deleteNoteButton;
     private Button shareNoteButton;
     private Button manageNodesButton;
     private ProgressBar progress;
@@ -158,7 +162,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("CF 手机优选 v1.23");
+        title.setText("CF 手机优选 v1.24");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(TEXT);
@@ -174,19 +178,17 @@ public class MainActivity extends Activity {
         LinearLayout sourceCard = card(root, "IP 数据源");
         sourceEdit = input(sourceCard, "网络地址或直接粘贴 IP 列表", pref("source", "https://zip.cm.edu.kg/all.txt"), 1, false);
         proxySourceEdit = input(sourceCard, "ProxyIP 数据源（网络地址或直接粘贴列表）", pref("proxySource", ""), 1, false);
-        textspaceUrlEdit = input(sourceCard, "TextSpace Worker 地址", pref("textspaceUrl", ""), 1, false);
-        textspaceTokenEdit = input(sourceCard, "管理员密钥", pref("textspaceToken", ""), 1, false);
-        textspaceTokenEdit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        textspaceTitleEdit = input(sourceCard, "文本标题", pref("textspaceTitle", "CF 手机优选结果"), 1, false);
+        textspaceUrlEdit = input(sourceCard, "TextSpace 地址 / 秘钥", prefTextspaceCombined(), 1, false);
+        textspaceTokenEdit = new EditText(this);
+        textspaceTokenEdit.setText(pref("textspaceToken", ""));
+        textspaceTitleEdit = new EditText(this);
+        textspaceTitleEdit.setText(pref("textspaceTitle", "CF 手机优选结果"));
         View.OnFocusChangeListener autoRefreshTextspace = (view, hasFocus) -> {
-            if (!hasFocus
-                    && !textspaceUrlEdit.getText().toString().trim().isEmpty()
-                    && !textspaceTokenEdit.getText().toString().trim().isEmpty()) {
+            if (!hasFocus && hasTextspaceSettings()) {
                 loadTextspaceNotes(false);
             }
         };
         textspaceUrlEdit.setOnFocusChangeListener(autoRefreshTextspace);
-        textspaceTokenEdit.setOnFocusChangeListener(autoRefreshTextspace);
         addRegionFilters(sourceCard);
 
         LinearLayout basicCard = card(root, "节点参数");
@@ -195,6 +197,11 @@ public class MainActivity extends Activity {
         uuidEdit = input(basicCard, "VLESS UUID（不填则只验证 WS 握手）", pref("uuid", ""), 1, false);
         proxyEdit = input(basicCard, "ProxyIP（可留空，只支持一个）", pref("proxyip", ""), 1, false);
         realUrlEdit = input(basicCard, "真实下载 URL", prefRealUrl(), 1, false);
+        Button importButton = button("从v2rayN剪切板导入", ORANGE);
+        importButton.setOnClickListener(v -> importV2rayConfigFromClipboard());
+        LinearLayout.LayoutParams importLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44));
+        importLp.topMargin = dp(8);
+        basicCard.addView(importButton, importLp);
 
         LinearLayout paramCard = card(root, "测速参数");
         LinearLayout row1 = row(paramCard);
@@ -217,6 +224,11 @@ public class MainActivity extends Activity {
         textspaceNoteSpinner = new Spinner(this);
         textspaceNoteSpinner.setBackground(fieldBg());
         noteRow.addView(textspaceNoteSpinner, new LinearLayout.LayoutParams(0, dp(44), 1));
+        newNoteButton = button("新建", BLUE);
+        newNoteButton.setOnClickListener(v -> promptCreateTextspaceNote());
+        LinearLayout.LayoutParams newNoteLp = new LinearLayout.LayoutParams(dp(66), dp(44));
+        newNoteLp.leftMargin = dp(8);
+        noteRow.addView(newNoteButton, newNoteLp);
         shareNoteButton = button("分享", GREEN);
         shareNoteButton.setOnClickListener(v -> saveTextspaceNote(true));
         LinearLayout.LayoutParams shareTopLp = new LinearLayout.LayoutParams(dp(66), dp(44));
@@ -235,6 +247,16 @@ public class MainActivity extends Activity {
             public void onNothingSelected(AdapterView<?> parent) {
             }
         });
+
+        LinearLayout noteManageRow = row(actionCard);
+        renameNoteButton = button("重命名", ORANGE);
+        renameNoteButton.setOnClickListener(v -> promptRenameTextspaceNote());
+        noteManageRow.addView(renameNoteButton, new LinearLayout.LayoutParams(0, dp(40), 1));
+        deleteNoteButton = button("删除", Color.rgb(220, 38, 38));
+        deleteNoteButton.setOnClickListener(v -> promptDeleteTextspaceNote());
+        LinearLayout.LayoutParams deleteNoteLp = new LinearLayout.LayoutParams(0, dp(40), 1);
+        deleteNoteLp.leftMargin = dp(8);
+        noteManageRow.addView(deleteNoteButton, deleteNoteLp);
 
         LinearLayout buttons = row(actionCard);
         startButton = button("开始测速", BLUE);
@@ -272,8 +294,7 @@ public class MainActivity extends Activity {
 
         setContentView(scroll);
         ui.postDelayed(() -> {
-            if (!textspaceUrlEdit.getText().toString().trim().isEmpty()
-                    && !textspaceTokenEdit.getText().toString().trim().isEmpty()) {
+            if (hasTextspaceSettings()) {
                 loadTextspaceNotes(false);
             } else {
                 updateTextspaceSpinner();
@@ -801,21 +822,13 @@ public class MainActivity extends Activity {
             log("ProxyIP 没有可连接结果，继续使用当前 ProxyIP");
             return;
         }
-        String bestAddress = proxyAddressForEdgetunnel(best);
+        String bestAddress = best.address();
         config.proxyip = bestAddress;
         prefs.edit().putString("proxyip", bestAddress).apply();
         ui.post(() -> proxyEdit.setText(bestAddress));
-        log("已自动选用 ProxyIP 第一名：" + best.address()
-                + (best.address().equals(bestAddress) ? "" : "，写入 " + bestAddress)
+        log("已自动选用 ProxyIP 第一名：" + bestAddress
                 + " 成功" + best.successes + "/" + config.repeats
                 + " " + String.format(Locale.US, "%.2fms", best.bestMs));
-    }
-
-    private String proxyAddressForEdgetunnel(ProxyResult proxy) {
-        if (proxy.port == 443 && !proxy.host.contains(":")) {
-            return proxy.host;
-        }
-        return proxy.address();
     }
 
     private ProxyResult firstUsableProxy(List<ProxyResult> results) {
@@ -876,6 +889,8 @@ public class MainActivity extends Activity {
     }
 
     private void saveConfig() {
+        TextspaceSettings settings = parseTextspaceSettings(false);
+        String combined = textspaceUrlEdit.getText().toString();
         prefs.edit()
                 .putString("source", sourceEdit.getText().toString())
                 .putString("proxySource", proxySourceEdit.getText().toString())
@@ -884,8 +899,9 @@ public class MainActivity extends Activity {
                 .putString("uuid", uuidEdit.getText().toString())
                 .putString("proxyip", proxyEdit.getText().toString())
                 .putString("realUrl", realUrlEdit.getText().toString())
-                .putString("textspaceUrl", textspaceUrlEdit.getText().toString())
-                .putString("textspaceToken", textspaceTokenEdit.getText().toString())
+                .putString("textspaceCombined", combined)
+                .putString("textspaceUrl", settings.baseUrl)
+                .putString("textspaceToken", settings.token)
                 .putString("textspaceTitle", textspaceTitleEdit.getText().toString())
                 .putString("textspaceContent", textspaceContentEdit.getText().toString())
                 .putString("timeout", timeoutEdit.getText().toString())
@@ -903,6 +919,52 @@ public class MainActivity extends Activity {
 
     private String pref(String key, String fallback) {
         return prefs.getString(key, fallback);
+    }
+
+    private String prefTextspaceCombined() {
+        String combined = pref("textspaceCombined", "").trim();
+        if (!combined.isEmpty()) return combined;
+        String base = pref("textspaceUrl", "").trim();
+        String token = pref("textspaceToken", "").trim();
+        if (base.isEmpty()) return "";
+        return token.isEmpty() ? base : base + " " + token;
+    }
+
+    private boolean hasTextspaceSettings() {
+        TextspaceSettings settings = parseTextspaceSettings(false);
+        return !settings.baseUrl.isEmpty() && !settings.token.isEmpty();
+    }
+
+    private TextspaceSettings parseTextspaceSettings(boolean strict) {
+        String raw = textspaceUrlEdit == null ? "" : textspaceUrlEdit.getText().toString().trim();
+        String fallbackToken = textspaceTokenEdit == null ? "" : textspaceTokenEdit.getText().toString().trim();
+        String base = "";
+        String token = "";
+        Matcher urlMatcher = Pattern.compile("https?://[^\\s|,，；;]+").matcher(raw);
+        if (urlMatcher.find()) {
+            base = urlMatcher.group();
+            String before = raw.substring(0, urlMatcher.start());
+            String after = raw.substring(urlMatcher.end());
+            token = (before + " " + after).trim();
+        } else {
+            base = raw;
+        }
+        int tokenIndex = base.indexOf("token=");
+        if (tokenIndex >= 0) {
+            String queryToken = base.substring(tokenIndex + 6).split("[&#\\s]+", 2)[0].trim();
+            if (!queryToken.isEmpty()) token = queryToken;
+            base = base.replaceFirst("[?&]token=[^&#\\s]+", "");
+        }
+        base = base.replaceAll("[,|，；;]+$", "").trim();
+        token = token.replaceFirst("^[,|，；;\\s]+", "").trim();
+        if (token.isEmpty()) token = fallbackToken;
+        if (strict) {
+            if (base.isEmpty() || (!base.startsWith("http://") && !base.startsWith("https://"))) {
+                throw new IllegalArgumentException("请填写 TextSpace 地址 / 秘钥");
+            }
+            if (token.isEmpty()) throw new IllegalArgumentException("请在 TextSpace 地址后填写管理员秘钥");
+        }
+        return new TextspaceSettings(base, token);
     }
 
     private String prefRealUrl() {
@@ -1070,7 +1132,7 @@ public class MainActivity extends Activity {
                     + "Connection: Upgrade\r\n"
                     + "Sec-WebSocket-Key: " + key + "\r\n"
                     + "Sec-WebSocket-Version: 13\r\n"
-                    + "User-Agent: CFMobileOptimizer/1.23\r\n\r\n";
+                    + "User-Agent: CFMobileOptimizer/1.24\r\n\r\n";
             out.write(request.getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
@@ -1190,7 +1252,7 @@ public class MainActivity extends Activity {
         String path = target.getFile().isEmpty() ? "/" : target.getFile();
         String request = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: " + host + "\r\n"
-                + "User-Agent: CFMobileOptimizer/1.23\r\n"
+                + "User-Agent: CFMobileOptimizer/1.24\r\n"
                 + "Accept: */*\r\n"
                 + "Connection: close\r\n\r\n";
         out.write(request.getBytes(StandardCharsets.US_ASCII));
@@ -1203,7 +1265,7 @@ public class MainActivity extends Activity {
             HttpURLConnection conn = (HttpURLConnection) new URL(text).openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
-            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.23");
+            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.24");
             try (InputStream in = conn.getInputStream()) {
                 text = new String(readAll(in), StandardCharsets.UTF_8);
             }
@@ -1494,6 +1556,90 @@ public class MainActivity extends Activity {
         Toast.makeText(this, toast, Toast.LENGTH_SHORT).show();
     }
 
+    private void importV2rayConfigFromClipboard() {
+        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        ClipData clip = cm == null ? null : cm.getPrimaryClip();
+        if (clip == null || clip.getItemCount() == 0) {
+            Toast.makeText(this, "剪切板没有内容", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        CharSequence cs = clip.getItemAt(0).coerceToText(this);
+        String text = cs == null ? "" : cs.toString();
+        String line = firstVlessLine(text);
+        if (line.isEmpty()) {
+            Toast.makeText(this, "没有找到 vless:// 配置", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try {
+            importVlessLine(line);
+            saveConfig();
+            Toast.makeText(this, "已导入 v2rayN 配置", Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            Toast.makeText(this, "导入失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private String firstVlessLine(String text) {
+        if (text == null) return "";
+        Matcher m = Pattern.compile("vless://\\S+", Pattern.CASE_INSENSITIVE).matcher(text);
+        return m.find() ? m.group().trim() : "";
+    }
+
+    private void importVlessLine(String line) throws Exception {
+        String body = line.substring("vless://".length());
+        int at = body.indexOf('@');
+        if (at <= 0) throw new IllegalArgumentException("缺少 UUID");
+        String uuid = body.substring(0, at).trim();
+        UUID.fromString(uuid);
+        uuidEdit.setText(uuid);
+
+        String rest = body.substring(at + 1);
+        int queryIndex = rest.indexOf('?');
+        String queryAndRemark = queryIndex >= 0 ? rest.substring(queryIndex + 1) : "";
+        int hashIndex = queryAndRemark.indexOf('#');
+        String query = hashIndex >= 0 ? queryAndRemark.substring(0, hashIndex) : queryAndRemark;
+        String host = queryParam(query, "host");
+        if (host.isEmpty()) host = queryParam(query, "sni");
+        if (!host.isEmpty()) hostEdit.setText(host);
+
+        String wsPath = queryParam(query, "path");
+        if (!wsPath.isEmpty()) {
+            pathEdit.setText(wsPath);
+            String proxy = extractProxyFromPath(wsPath);
+            if (!proxy.isEmpty()) {
+                proxyEdit.setText(proxy);
+                addProxySourceIfMissing(proxy);
+            }
+        }
+    }
+
+    private String queryParam(String query, String key) throws Exception {
+        if (query == null || query.isEmpty()) return "";
+        for (String part : query.split("&")) {
+            int eq = part.indexOf('=');
+            if (eq <= 0) continue;
+            String k = URLDecoder.decode(part.substring(0, eq), "UTF-8");
+            if (!key.equalsIgnoreCase(k)) continue;
+            return URLDecoder.decode(part.substring(eq + 1), "UTF-8");
+        }
+        return "";
+    }
+
+    private String extractProxyFromPath(String path) {
+        Matcher m = Pattern.compile("proxyip=([^/?&#]+)", Pattern.CASE_INSENSITIVE).matcher(path);
+        return m.find() ? m.group(1).trim() : "";
+    }
+
+    private void addProxySourceIfMissing(String proxy) {
+        if (proxy == null || proxy.trim().isEmpty()) return;
+        String value = proxy.trim();
+        String existing = proxySourceEdit.getText().toString();
+        for (String token : existing.split("[,;\\s]+")) {
+            if (value.equalsIgnoreCase(token.trim())) return;
+        }
+        proxySourceEdit.setText(existing.trim().isEmpty() ? value : existing.trim() + "\n" + value);
+    }
+
     private void promptSaveBoundNodes() {
         String title = textspaceTitleEdit.getText().toString().trim();
         if (title.isEmpty() && currentNote != null) title = currentNote.title;
@@ -1528,6 +1674,98 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             Toast.makeText(this, e.getMessage(), Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void promptCreateTextspaceNote() {
+        EditText input = dialogInput("新文本名称", "CF 手机优选结果");
+        new AlertDialog.Builder(this)
+                .setTitle("新建文本")
+                .setView(input)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("新建", (dialog, which) -> {
+                    String title = input.getText().toString().trim();
+                    if (title.isEmpty()) title = "CF 手机优选结果";
+                    currentNote = null;
+                    textspaceTitleEdit.setText(title);
+                    textspaceContentEdit.setText("");
+                    saveTextspaceNote(false, "已新建文本：" + title);
+                })
+                .show();
+    }
+
+    private void promptRenameTextspaceNote() {
+        if (currentNote == null || currentNote.id.isEmpty()) {
+            Toast.makeText(this, "当前没有选中文本", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        EditText input = dialogInput("文本名称", currentNote.title);
+        new AlertDialog.Builder(this)
+                .setTitle("重命名文本")
+                .setView(input)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("保存", (dialog, which) -> {
+                    String title = input.getText().toString().trim();
+                    if (title.isEmpty()) title = "未命名文本";
+                    textspaceTitleEdit.setText(title);
+                    saveTextspaceNote(false, "已重命名为：" + title);
+                })
+                .show();
+    }
+
+    private void promptDeleteTextspaceNote() {
+        if (currentNote == null || currentNote.id.isEmpty()) {
+            Toast.makeText(this, "当前没有选中文本", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String title = currentNote.title == null || currentNote.title.trim().isEmpty() ? "当前文本" : currentNote.title.trim();
+        new AlertDialog.Builder(this)
+                .setTitle("删除文本")
+                .setMessage("确定删除「" + title + "」吗？")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("删除", (dialog, which) -> deleteCurrentTextspaceNote())
+                .show();
+    }
+
+    private EditText dialogInput(String hint, String value) {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint(hint);
+        input.setText(value == null ? "" : value);
+        input.setTextSize(15);
+        input.setPadding(dp(10), 0, dp(10), 0);
+        input.setBackground(fieldBg());
+        return input;
+    }
+
+    private void deleteCurrentTextspaceNote() {
+        if (currentNote == null || currentNote.id.isEmpty() || textspaceRunning) return;
+        String deleteId = currentNote.id;
+        textspaceRunning = true;
+        setTextspaceButtons(false);
+        status("正在删除文本");
+        new Thread(() -> {
+            try {
+                textspaceRequest("DELETE", "/api/notes/" + urlPart(deleteId), null);
+                ui.post(() -> {
+                    removeNoteSummary(deleteId);
+                    currentNote = null;
+                    textspaceTitleEdit.setText("");
+                    textspaceContentEdit.setText("");
+                    updateTextspaceSpinner();
+                    Toast.makeText(this, "已删除文本", Toast.LENGTH_SHORT).show();
+                    status("已删除文本");
+                    if (!textspaceNotes.isEmpty()) {
+                        ui.postDelayed(() -> loadTextspaceNoteById(textspaceNotes.get(0).id), 200);
+                    }
+                });
+            } catch (Exception e) {
+                log("TextSpace 删除失败: " + e.getMessage());
+                toast("删除失败: " + e.getMessage());
+            } finally {
+                textspaceRunning = false;
+                ui.post(() -> setTextspaceButtons(true));
+            }
+        }).start();
     }
 
     private void showNodeManager() {
@@ -1636,6 +1874,7 @@ public class MainActivity extends Activity {
         for (NodeLine node : nodes) {
             if (!q.isEmpty() && !node.searchText.contains(q)) continue;
             visibleLineIndexes.add(node.lineIndex);
+            if (shown >= NODE_MANAGER_RENDER_LIMIT) continue;
 
             CheckBox cb = new CheckBox(this);
             cb.setText(node.display);
@@ -1645,7 +1884,11 @@ public class MainActivity extends Activity {
             cb.setOnCheckedChangeListener((buttonView, isChecked) -> {
                 if (isChecked) selectedLineIndexes.add(node.lineIndex);
                 else selectedLineIndexes.remove(node.lineIndex);
-                countText.setText("显示 " + visibleLineIndexes.size() + " / 总 " + nodes.size() + "，已勾选 " + selectedLineIndexes.size());
+                countText.setText(nodeManagerCountText(
+                        visibleLineIndexes.size(),
+                        Math.min(visibleLineIndexes.size(), NODE_MANAGER_RENDER_LIMIT),
+                        nodes.size(),
+                        selectedLineIndexes.size()));
             });
             list.addView(cb, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
             shown++;
@@ -1654,7 +1897,12 @@ public class MainActivity extends Activity {
             TextView empty = label("没有匹配节点。");
             list.addView(empty);
         }
-        countText.setText("显示 " + shown + " / 总 " + nodes.size() + "，已勾选 " + selectedLineIndexes.size());
+        countText.setText(nodeManagerCountText(visibleLineIndexes.size(), shown, nodes.size(), selectedLineIndexes.size()));
+    }
+
+    private String nodeManagerCountText(int matched, int shown, int total, int selected) {
+        String capped = matched > shown ? "，已显示前 " + shown + " 条" : "";
+        return "匹配 " + matched + " / 总 " + total + capped + "，已勾选 " + selected;
     }
 
     private List<NodeLine> parseNodeLines(String content) {
@@ -2001,6 +2249,9 @@ public class MainActivity extends Activity {
     }
 
     private void setTextspaceButtons(boolean enabled) {
+        newNoteButton.setEnabled(enabled);
+        renameNoteButton.setEnabled(enabled);
+        deleteNoteButton.setEnabled(enabled);
         shareNoteButton.setEnabled(enabled);
         manageNodesButton.setEnabled(enabled);
     }
@@ -2066,6 +2317,14 @@ public class MainActivity extends Activity {
         textspaceNotes.add(0, summary);
     }
 
+    private void removeNoteSummary(String id) {
+        List<NoteSummary> next = new ArrayList<>();
+        for (NoteSummary note : textspaceNotes) {
+            if (!id.equals(note.id)) next.add(note);
+        }
+        textspaceNotes = next;
+    }
+
     private String textspaceRequest(String method, String path, String body) throws Exception {
         URL url = new URL(textspaceBaseUrl() + path);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -2074,7 +2333,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setRequestProperty("Authorization", "Bearer " + textspaceToken());
         conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.23");
+        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.24");
         if (body != null) {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
@@ -2090,18 +2349,13 @@ public class MainActivity extends Activity {
     }
 
     private String textspaceBaseUrl() {
-        String value = textspaceUrlEdit.getText().toString().trim();
+        String value = parseTextspaceSettings(true).baseUrl;
         while (value.endsWith("/")) value = value.substring(0, value.length() - 1);
-        if (!value.startsWith("http://") && !value.startsWith("https://")) {
-            throw new IllegalArgumentException("请填写正确的 Worker 地址");
-        }
         return value;
     }
 
     private String textspaceToken() {
-        String token = textspaceTokenEdit.getText().toString().trim();
-        if (token.isEmpty()) throw new IllegalArgumentException("请填写管理员密钥");
-        return token;
+        return parseTextspaceSettings(true).token;
     }
 
     private String readTextspaceError(String text, int code) {
@@ -2381,6 +2635,16 @@ public class MainActivity extends Activity {
             this.display = display == null ? this.address : display;
             this.searchText = (this.rawLine + " " + this.address + " " + this.region + " " + this.proxy + " " + this.remark + " " + this.display)
                     .toLowerCase(Locale.ROOT);
+        }
+    }
+
+    static class TextspaceSettings {
+        final String baseUrl;
+        final String token;
+
+        TextspaceSettings(String baseUrl, String token) {
+            this.baseUrl = baseUrl == null ? "" : baseUrl.trim();
+            this.token = token == null ? "" : token.trim();
         }
     }
 
