@@ -105,6 +105,7 @@ public class MainActivity extends Activity {
     private static final String ENC_PREFIX = "enc:v1:";
     private static final String SCAN_CHANNEL_ID = "cf_optimizer_scan";
     private static final int SCAN_NOTIFICATION_ID = 101;
+    static final String EXTRA_QUICK_RUN_ONCE = "com.cfoptimizer.mobile.QUICK_RUN_ONCE";
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final SecureRandom random = new SecureRandom();
@@ -158,15 +159,27 @@ public class MainActivity extends Activity {
     private NoteDetail currentNote;
     private CheckBox autoRunOnLaunchCheck;
     private boolean autoRunStarted = false;
+    private boolean quickRunMode = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        quickRunMode = getIntent() != null && getIntent().getBooleanExtra(EXTRA_QUICK_RUN_ONCE, false);
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         setupWindow();
         buildUi();
         ensureNotificationPermission();
         ensureNotificationChannel();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (intent != null && intent.getBooleanExtra(EXTRA_QUICK_RUN_ONCE, false)) {
+            quickRunMode = true;
+            ui.postDelayed(this::startQuickRunOnce, 300);
+        }
     }
 
     @Override
@@ -196,7 +209,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("CF优选 v1.29");
+        title.setText("CF优选 v1.30");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(TEXT);
@@ -359,7 +372,11 @@ public class MainActivity extends Activity {
             } else {
                 updateTextspaceSpinner();
             }
-            ui.postDelayed(this::maybeAutoRunOnLaunch, 1500);
+            if (quickRunMode) {
+                ui.postDelayed(this::startQuickRunOnce, 1500);
+            } else {
+                ui.postDelayed(this::maybeAutoRunOnLaunch, 1500);
+            }
         }, 300);
     }
 
@@ -824,6 +841,7 @@ public class MainActivity extends Activity {
                 log("解析目标 " + targets.size() + " 条");
                 if (targets.isEmpty()) {
                     toast("没有解析到符合区域的 IP");
+                    finishQuickRunSoon();
                     return;
                 }
 
@@ -853,6 +871,7 @@ public class MainActivity extends Activity {
                 showScanNotification("测速失败：" + e.getMessage(), 100, false);
                 log("错误: " + e.getMessage());
                 toast("测速失败: " + e.getMessage());
+                finishQuickRunSoon();
             } finally {
                 running = false;
                 ui.post(() -> startButton.setEnabled(true));
@@ -1292,7 +1311,7 @@ public class MainActivity extends Activity {
                     + "Connection: Upgrade\r\n"
                     + "Sec-WebSocket-Key: " + key + "\r\n"
                     + "Sec-WebSocket-Version: 13\r\n"
-                    + "User-Agent: CFMobileOptimizer/1.29\r\n\r\n";
+                    + "User-Agent: CFMobileOptimizer/1.30\r\n\r\n";
             out.write(request.getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
@@ -1412,7 +1431,7 @@ public class MainActivity extends Activity {
         String path = target.getFile().isEmpty() ? "/" : target.getFile();
         String request = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: " + host + "\r\n"
-                + "User-Agent: CFMobileOptimizer/1.29\r\n"
+                + "User-Agent: CFMobileOptimizer/1.30\r\n"
                 + "Accept: */*\r\n"
                 + "Connection: close\r\n\r\n";
         out.write(request.getBytes(StandardCharsets.US_ASCII));
@@ -1425,7 +1444,7 @@ public class MainActivity extends Activity {
             HttpURLConnection conn = (HttpURLConnection) new URL(text).openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
-            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.29");
+            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.30");
             try (InputStream in = conn.getInputStream()) {
                 text = new String(readAll(in), StandardCharsets.UTF_8);
             }
@@ -1801,7 +1820,7 @@ public class MainActivity extends Activity {
     }
 
     private void handleBoundNodesAfterScan() {
-        if (autoOverwriteSaveCheck != null && autoOverwriteSaveCheck.isChecked()) {
+        if (quickRunMode || (autoOverwriteSaveCheck != null && autoOverwriteSaveCheck.isChecked())) {
             showScanNotification("测速完成，正在自动覆盖保存", 100, true);
             saveBoundNodesToTextspace(false);
         } else {
@@ -1829,6 +1848,7 @@ public class MainActivity extends Activity {
             String text = buildEdgetunnelBoundNodes();
             if (text.isEmpty()) {
                 Toast.makeText(this, "没有可保存的绑定节点", Toast.LENGTH_SHORT).show();
+                finishQuickRunSoon();
                 return;
             }
             if (textspaceTitleEdit.getText().toString().trim().isEmpty()) {
@@ -1843,6 +1863,7 @@ public class MainActivity extends Activity {
             saveTextspaceNote(false);
         } catch (Exception e) {
             Toast.makeText(this, e.getMessage(), Toast.LENGTH_SHORT).show();
+            finishQuickRunSoon();
         }
     }
 
@@ -2408,12 +2429,14 @@ public class MainActivity extends Activity {
                     }
                     if (!share) {
                         showScanNotification("已保存到 TextSpace：" + finalTitle, 100, false);
+                        finishQuickRunSoon();
                     }
                     status(share ? "已复制分享 URL：" + finalShareUrl : "已同步 TextSpace：" + finalTitle);
                 });
             } catch (Exception e) {
                 log("TextSpace 保存失败: " + e.getMessage());
                 toast("保存失败: " + e.getMessage());
+                finishQuickRunSoon();
             } finally {
                 textspaceRunning = false;
                 ui.post(() -> setTextspaceButtons(true));
@@ -2506,7 +2529,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setRequestProperty("Authorization", "Bearer " + textspaceToken());
         conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.29");
+        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.30");
         if (body != null) {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
@@ -2743,6 +2766,29 @@ public class MainActivity extends Activity {
         if (autoRunOnLaunchCheck == null || !autoRunOnLaunchCheck.isChecked()) return;
         autoRunStarted = true;
         startScan();
+    }
+
+    private void startQuickRunOnce() {
+        if (autoRunStarted) return;
+        autoRunStarted = true;
+        if (running) {
+            moveTaskToBack(true);
+            return;
+        }
+        showScanNotification("快捷开关已启动后台测速", 0, true);
+        startScan();
+        ui.postDelayed(() -> moveTaskToBack(true), 250);
+    }
+
+    private void finishQuickRunSoon() {
+        if (!quickRunMode) return;
+        ui.postDelayed(() -> {
+            try {
+                finishAndRemoveTask();
+            } catch (Exception ignored) {
+                finish();
+            }
+        }, 1500);
     }
 
     private void ensureNotificationPermission() {
