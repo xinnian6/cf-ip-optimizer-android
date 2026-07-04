@@ -162,7 +162,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("CF 手机优选 v1.24");
+        title.setText("CF 手机优选 v1.25");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(TEXT);
@@ -184,8 +184,11 @@ public class MainActivity extends Activity {
         textspaceTitleEdit = new EditText(this);
         textspaceTitleEdit.setText(pref("textspaceTitle", "CF 手机优选结果"));
         View.OnFocusChangeListener autoRefreshTextspace = (view, hasFocus) -> {
-            if (!hasFocus && hasTextspaceSettings()) {
-                loadTextspaceNotes(false);
+            if (!hasFocus) {
+                maskTextspaceInput();
+                if (hasTextspaceSettings()) {
+                    loadTextspaceNotes(false);
+                }
             }
         };
         textspaceUrlEdit.setOnFocusChangeListener(autoRefreshTextspace);
@@ -223,17 +226,7 @@ public class MainActivity extends Activity {
         LinearLayout noteRow = row(actionCard);
         textspaceNoteSpinner = new Spinner(this);
         textspaceNoteSpinner.setBackground(fieldBg());
-        noteRow.addView(textspaceNoteSpinner, new LinearLayout.LayoutParams(0, dp(44), 1));
-        newNoteButton = button("新建", BLUE);
-        newNoteButton.setOnClickListener(v -> promptCreateTextspaceNote());
-        LinearLayout.LayoutParams newNoteLp = new LinearLayout.LayoutParams(dp(66), dp(44));
-        newNoteLp.leftMargin = dp(8);
-        noteRow.addView(newNoteButton, newNoteLp);
-        shareNoteButton = button("分享", GREEN);
-        shareNoteButton.setOnClickListener(v -> saveTextspaceNote(true));
-        LinearLayout.LayoutParams shareTopLp = new LinearLayout.LayoutParams(dp(66), dp(44));
-        shareTopLp.leftMargin = dp(8);
-        noteRow.addView(shareNoteButton, shareTopLp);
+        noteRow.addView(textspaceNoteSpinner, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
         textspaceNoteSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
@@ -249,14 +242,24 @@ public class MainActivity extends Activity {
         });
 
         LinearLayout noteManageRow = row(actionCard);
-        renameNoteButton = button("重命名", ORANGE);
+        newNoteButton = button("新建", BLUE);
+        newNoteButton.setOnClickListener(v -> promptCreateTextspaceNote());
+        noteManageRow.addView(newNoteButton, new LinearLayout.LayoutParams(0, dp(40), 1));
+        renameNoteButton = button("改名", ORANGE);
         renameNoteButton.setOnClickListener(v -> promptRenameTextspaceNote());
-        noteManageRow.addView(renameNoteButton, new LinearLayout.LayoutParams(0, dp(40), 1));
+        LinearLayout.LayoutParams renameLp = new LinearLayout.LayoutParams(0, dp(40), 1);
+        renameLp.leftMargin = dp(8);
+        noteManageRow.addView(renameNoteButton, renameLp);
         deleteNoteButton = button("删除", Color.rgb(220, 38, 38));
         deleteNoteButton.setOnClickListener(v -> promptDeleteTextspaceNote());
         LinearLayout.LayoutParams deleteNoteLp = new LinearLayout.LayoutParams(0, dp(40), 1);
         deleteNoteLp.leftMargin = dp(8);
         noteManageRow.addView(deleteNoteButton, deleteNoteLp);
+        shareNoteButton = button("分享", GREEN);
+        shareNoteButton.setOnClickListener(v -> saveTextspaceNote(true));
+        LinearLayout.LayoutParams shareTopLp = new LinearLayout.LayoutParams(0, dp(40), 1);
+        shareTopLp.leftMargin = dp(8);
+        noteManageRow.addView(shareNoteButton, shareTopLp);
 
         LinearLayout buttons = row(actionCard);
         startButton = button("开始测速", BLUE);
@@ -294,6 +297,7 @@ public class MainActivity extends Activity {
 
         setContentView(scroll);
         ui.postDelayed(() -> {
+            maskTextspaceInput();
             if (hasTextspaceSettings()) {
                 loadTextspaceNotes(false);
             } else {
@@ -923,9 +927,10 @@ public class MainActivity extends Activity {
 
     private String prefTextspaceCombined() {
         String combined = pref("textspaceCombined", "").trim();
-        if (!combined.isEmpty()) return combined;
         String base = pref("textspaceUrl", "").trim();
         String token = pref("textspaceToken", "").trim();
+        if (!base.isEmpty() && !token.isEmpty()) return base + " / ******";
+        if (!combined.isEmpty()) return combined;
         if (base.isEmpty()) return "";
         return token.isEmpty() ? base : base + " " + token;
     }
@@ -956,8 +961,8 @@ public class MainActivity extends Activity {
             base = base.replaceFirst("[?&]token=[^&#\\s]+", "");
         }
         base = base.replaceAll("[,|，；;]+$", "").trim();
-        token = token.replaceFirst("^[,|，；;\\s]+", "").trim();
-        if (token.isEmpty()) token = fallbackToken;
+        token = token.replaceFirst("^[,|，；;\\s/]+", "").trim();
+        if (token.isEmpty() || token.matches("\\*+")) token = fallbackToken;
         if (strict) {
             if (base.isEmpty() || (!base.startsWith("http://") && !base.startsWith("https://"))) {
                 throw new IllegalArgumentException("请填写 TextSpace 地址 / 秘钥");
@@ -965,6 +970,16 @@ public class MainActivity extends Activity {
             if (token.isEmpty()) throw new IllegalArgumentException("请在 TextSpace 地址后填写管理员秘钥");
         }
         return new TextspaceSettings(base, token);
+    }
+
+    private void maskTextspaceInput() {
+        TextspaceSettings settings = parseTextspaceSettings(false);
+        if (settings.baseUrl.isEmpty() || settings.token.isEmpty()) return;
+        textspaceTokenEdit.setText(settings.token);
+        String masked = settings.baseUrl + " / ******";
+        if (!masked.equals(textspaceUrlEdit.getText().toString().trim())) {
+            textspaceUrlEdit.setText(masked);
+        }
     }
 
     private String prefRealUrl() {
@@ -1132,7 +1147,7 @@ public class MainActivity extends Activity {
                     + "Connection: Upgrade\r\n"
                     + "Sec-WebSocket-Key: " + key + "\r\n"
                     + "Sec-WebSocket-Version: 13\r\n"
-                    + "User-Agent: CFMobileOptimizer/1.24\r\n\r\n";
+                    + "User-Agent: CFMobileOptimizer/1.25\r\n\r\n";
             out.write(request.getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
@@ -1252,7 +1267,7 @@ public class MainActivity extends Activity {
         String path = target.getFile().isEmpty() ? "/" : target.getFile();
         String request = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: " + host + "\r\n"
-                + "User-Agent: CFMobileOptimizer/1.24\r\n"
+                + "User-Agent: CFMobileOptimizer/1.25\r\n"
                 + "Accept: */*\r\n"
                 + "Connection: close\r\n\r\n";
         out.write(request.getBytes(StandardCharsets.US_ASCII));
@@ -1265,7 +1280,7 @@ public class MainActivity extends Activity {
             HttpURLConnection conn = (HttpURLConnection) new URL(text).openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
-            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.24");
+            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.25");
             try (InputStream in = conn.getInputStream()) {
                 text = new String(readAll(in), StandardCharsets.UTF_8);
             }
@@ -2333,7 +2348,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setRequestProperty("Authorization", "Bearer " + textspaceToken());
         conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.24");
+        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.25");
         if (body != null) {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
@@ -2395,8 +2410,12 @@ public class MainActivity extends Activity {
         String path = base == null || base.trim().isEmpty() ? "/" : base.trim();
         if (!path.startsWith("/")) path = "/" + path;
         if (proxy == null || proxy.trim().isEmpty()) return path;
+        String encoded = URLEncoder.encode(proxy.trim(), "UTF-8");
+        if (path.toLowerCase(Locale.ROOT).contains("proxyip=")) {
+            return path.replaceFirst("(?i)proxyip=[^/?&#]+", "proxyip=" + Matcher.quoteReplacement(encoded));
+        }
         String sep = path.contains("?") ? "&" : "?";
-        return path + sep + "proxyip=" + URLEncoder.encode(proxy.trim(), "UTF-8");
+        return path + sep + "proxyip=" + encoded;
     }
 
     private void writeWsFrame(OutputStream out, byte[] payload) throws IOException {
