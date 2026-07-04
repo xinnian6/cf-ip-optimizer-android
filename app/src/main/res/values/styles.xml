@@ -17,4 +17,10 @@
         <item name="android:statusBarColor">#2563EB</item>
         <item name="android:navigationBarColor">#2563EB</item>
     </style>
+
+    <style name="QuickRunTheme" parent="android:style/Theme.NoDisplay">
+        <item name="android:windowDisablePreview">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+    </style>
 </resources>

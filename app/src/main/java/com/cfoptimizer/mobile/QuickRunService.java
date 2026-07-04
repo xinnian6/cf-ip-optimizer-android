@@ -73,7 +73,7 @@ public class QuickRunService extends Service {
     private static final String DEFAULT_REAL_URL = "http://speedtest.tele2.net/10MB.zip";
     private static final String OLD_REAL_URL = "http://cachefly.cachefly.net/10mb.test";
     private static final String BAD_REAL_URL = "http://cachefly.cachefly.net/100mb.test";
-    private static final String USER_AGENT = "CFMobileOptimizer/1.31";
+    private static final String USER_AGENT = "CFMobileOptimizer/1.32";
 
     private final SecureRandom random = new SecureRandom();
     private volatile boolean running = false;

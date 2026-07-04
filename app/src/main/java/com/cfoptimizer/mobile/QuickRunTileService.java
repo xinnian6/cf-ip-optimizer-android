@@ -1,5 +1,6 @@
 package com.cfoptimizer.mobile;
 
+import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Build;
@@ -18,11 +19,17 @@ public class QuickRunTileService extends TileService {
     @Override
     public void onClick() {
         super.onClick();
-        Intent intent = new Intent(this, QuickRunService.class);
-        if (Build.VERSION.SDK_INT >= 26) {
-            startForegroundService(intent);
+        Intent intent = new Intent(this, QuickRunActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        if (Build.VERSION.SDK_INT >= 34) {
+            PendingIntent pendingIntent = PendingIntent.getActivity(
+                    this,
+                    31,
+                    intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            startActivityAndCollapse(pendingIntent);
         } else {
-            startService(intent);
+            startActivityAndCollapse(intent);
         }
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         prefs.edit().putBoolean("quickRunRunning", true).apply();
