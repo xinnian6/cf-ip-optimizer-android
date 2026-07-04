@@ -13,6 +13,8 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyProperties;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
@@ -42,6 +44,7 @@ import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyStore;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -66,6 +69,10 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -85,6 +92,10 @@ public class MainActivity extends Activity {
     private static final String OLD_REAL_URL = "http://cachefly.cachefly.net/10mb.test";
     private static final String BAD_REAL_URL = "http://cachefly.cachefly.net/100mb.test";
     private static final int NODE_MANAGER_RENDER_LIMIT = 250;
+    private static final String KEYSTORE_PROVIDER = "AndroidKeyStore";
+    private static final String SECURE_KEY_ALIAS = "cf_optimizer_secure_prefs_v1";
+    private static final String SECURE_PREFIX = "secure_";
+    private static final String ENC_PREFIX = "enc:v1:";
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final SecureRandom random = new SecureRandom();
@@ -162,7 +173,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("CF 手机优选 v1.25");
+        title.setText("CF 手机优选 v1.26");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(TEXT);
@@ -177,10 +188,10 @@ public class MainActivity extends Activity {
 
         LinearLayout sourceCard = card(root, "IP 数据源");
         sourceEdit = input(sourceCard, "网络地址或直接粘贴 IP 列表", pref("source", "https://zip.cm.edu.kg/all.txt"), 1, false);
-        proxySourceEdit = input(sourceCard, "ProxyIP 数据源（网络地址或直接粘贴列表）", pref("proxySource", ""), 1, false);
+        proxySourceEdit = input(sourceCard, "ProxyIP 数据源（网络地址或直接粘贴列表）", securePref("proxySource", ""), 1, false);
         textspaceUrlEdit = input(sourceCard, "TextSpace 地址 / 秘钥", prefTextspaceCombined(), 1, false);
         textspaceTokenEdit = new EditText(this);
-        textspaceTokenEdit.setText(pref("textspaceToken", ""));
+        textspaceTokenEdit.setText(securePref("textspaceToken", ""));
         textspaceTitleEdit = new EditText(this);
         textspaceTitleEdit.setText(pref("textspaceTitle", "CF 手机优选结果"));
         View.OnFocusChangeListener autoRefreshTextspace = (view, hasFocus) -> {
@@ -196,9 +207,9 @@ public class MainActivity extends Activity {
 
         LinearLayout basicCard = card(root, "节点参数");
         hostEdit = input(basicCard, "SNI / Host 域名", pref("host", "xinnian.us.ci"), 1, false);
-        pathEdit = input(basicCard, "WS 路径", pref("path", "/"), 1, false);
-        uuidEdit = input(basicCard, "VLESS UUID（不填则只验证 WS 握手）", pref("uuid", ""), 1, false);
-        proxyEdit = input(basicCard, "ProxyIP（可留空，只支持一个）", pref("proxyip", ""), 1, false);
+        pathEdit = input(basicCard, "WS 路径", securePref("path", "/"), 1, false);
+        uuidEdit = input(basicCard, "VLESS UUID（不填则只验证 WS 握手）", securePref("uuid", ""), 1, false);
+        proxyEdit = input(basicCard, "ProxyIP（可留空，只支持一个）", securePref("proxyip", ""), 1, false);
         realUrlEdit = input(basicCard, "真实下载 URL", prefRealUrl(), 1, false);
         Button importButton = button("从v2rayN剪切板导入", ORANGE);
         importButton.setOnClickListener(v -> importV2rayConfigFromClipboard());
@@ -288,7 +299,7 @@ public class MainActivity extends Activity {
         resultText = monoText();
         resultCard.addView(resultText);
 
-        textspaceContentEdit = bareInput(actionCard, pref("textspaceContent", ""), 8, false);
+        textspaceContentEdit = bareInput(actionCard, securePref("textspaceContent", ""), 8, false);
         textspaceContentEdit.setVisibility(View.GONE);
 
         LinearLayout logCard = card(root, "运行日志");
@@ -759,7 +770,7 @@ public class MainActivity extends Activity {
                         + " Host=" + config.host
                         + " WS路径=" + config.path
                         + " 下载URL=" + config.realUrl
-                        + (config.proxyip.isEmpty() ? "" : " ProxyIP=" + config.proxyip));
+                        + " ProxyIP=" + (config.proxyip.isEmpty() ? "空" : "已填写"));
                 List<Target> targets = loadTargets(sourceEdit.getText().toString(), config.regions, true);
                 log("解析目标 " + targets.size() + " 条");
                 if (targets.isEmpty()) {
@@ -828,9 +839,11 @@ public class MainActivity extends Activity {
         }
         String bestAddress = best.address();
         config.proxyip = bestAddress;
-        prefs.edit().putString("proxyip", bestAddress).apply();
+        SharedPreferences.Editor editor = prefs.edit();
+        putSecureString(editor, "proxyip", bestAddress);
+        editor.apply();
         ui.post(() -> proxyEdit.setText(bestAddress));
-        log("已自动选用 ProxyIP 第一名：" + bestAddress
+        log("已自动选用 ProxyIP 第一名"
                 + " 成功" + best.successes + "/" + config.repeats
                 + " " + String.format(Locale.US, "%.2fms", best.bestMs));
     }
@@ -895,19 +908,12 @@ public class MainActivity extends Activity {
     private void saveConfig() {
         TextspaceSettings settings = parseTextspaceSettings(false);
         String combined = textspaceUrlEdit.getText().toString();
-        prefs.edit()
+        SharedPreferences.Editor editor = prefs.edit()
                 .putString("source", sourceEdit.getText().toString())
-                .putString("proxySource", proxySourceEdit.getText().toString())
                 .putString("host", hostEdit.getText().toString())
-                .putString("path", pathEdit.getText().toString())
-                .putString("uuid", uuidEdit.getText().toString())
-                .putString("proxyip", proxyEdit.getText().toString())
                 .putString("realUrl", realUrlEdit.getText().toString())
-                .putString("textspaceCombined", combined)
                 .putString("textspaceUrl", settings.baseUrl)
-                .putString("textspaceToken", settings.token)
                 .putString("textspaceTitle", textspaceTitleEdit.getText().toString())
-                .putString("textspaceContent", textspaceContentEdit.getText().toString())
                 .putString("timeout", timeoutEdit.getText().toString())
                 .putString("concurrency", concurrencyEdit.getText().toString())
                 .putString("candidates", candidatesEdit.getText().toString())
@@ -917,18 +923,95 @@ public class MainActivity extends Activity {
                 .putString("minSpeed", minSpeedEdit.getText().toString())
                 .putBoolean("regionAllV2", allRegionCheck != null && allRegionCheck.isChecked())
                 .putString("regionSelectedV2", join(new ArrayList<>(selectedRegionCodes), ","))
-                .putString("regionCustomItemsV2", customRegionPrefsValue())
-                .apply();
+                .putString("regionCustomItemsV2", customRegionPrefsValue());
+        putSecureString(editor, "proxySource", proxySourceEdit.getText().toString());
+        putSecureString(editor, "path", pathEdit.getText().toString());
+        putSecureString(editor, "uuid", uuidEdit.getText().toString());
+        putSecureString(editor, "proxyip", proxyEdit.getText().toString());
+        putSecureString(editor, "textspaceCombined", combined);
+        putSecureString(editor, "textspaceToken", settings.token);
+        putSecureString(editor, "textspaceContent", textspaceContentEdit.getText().toString());
+        editor.apply();
     }
 
     private String pref(String key, String fallback) {
         return prefs.getString(key, fallback);
     }
 
+    private String securePref(String key, String fallback) {
+        String encrypted = prefs.getString(SECURE_PREFIX + key, "");
+        if (encrypted != null && encrypted.startsWith(ENC_PREFIX)) {
+            String decrypted = decryptString(encrypted);
+            if (decrypted != null) return decrypted;
+        }
+        return prefs.getString(key, fallback);
+    }
+
+    private void putSecureString(SharedPreferences.Editor editor, String key, String value) {
+        String plain = value == null ? "" : value;
+        String encrypted = encryptString(plain);
+        if (encrypted == null) {
+            editor.remove(SECURE_PREFIX + key);
+            editor.putString(key, plain);
+            return;
+        }
+        editor.putString(SECURE_PREFIX + key, encrypted);
+        editor.remove(key);
+    }
+
+    private String encryptString(String plain) {
+        try {
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.ENCRYPT_MODE, secureKey());
+            byte[] iv = cipher.getIV();
+            byte[] encrypted = cipher.doFinal(plain.getBytes(StandardCharsets.UTF_8));
+            return ENC_PREFIX
+                    + Base64.getEncoder().encodeToString(iv)
+                    + ":"
+                    + Base64.getEncoder().encodeToString(encrypted);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String decryptString(String encryptedValue) {
+        try {
+            String payload = encryptedValue.substring(ENC_PREFIX.length());
+            String[] parts = payload.split(":", 2);
+            if (parts.length != 2) return null;
+            byte[] iv = Base64.getDecoder().decode(parts[0]);
+            byte[] encrypted = Base64.getDecoder().decode(parts[1]);
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.DECRYPT_MODE, secureKey(), new GCMParameterSpec(128, iv));
+            return new String(cipher.doFinal(encrypted), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private SecretKey secureKey() throws Exception {
+        KeyStore keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER);
+        keyStore.load(null);
+        if (keyStore.containsAlias(SECURE_KEY_ALIAS)) {
+            return (SecretKey) keyStore.getKey(SECURE_KEY_ALIAS, null);
+        }
+        KeyGenerator generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE_PROVIDER);
+        KeyGenParameterSpec spec = new KeyGenParameterSpec.Builder(
+                SECURE_KEY_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT
+        )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setRandomizedEncryptionRequired(true)
+                .build();
+        generator.init(spec);
+        return generator.generateKey();
+    }
+
     private String prefTextspaceCombined() {
-        String combined = pref("textspaceCombined", "").trim();
+        String combined = securePref("textspaceCombined", "").trim();
         String base = pref("textspaceUrl", "").trim();
-        String token = pref("textspaceToken", "").trim();
+        String token = securePref("textspaceToken", "").trim();
         if (!base.isEmpty() && !token.isEmpty()) return base + " / ******";
         if (!combined.isEmpty()) return combined;
         if (base.isEmpty()) return "";
@@ -1147,7 +1230,7 @@ public class MainActivity extends Activity {
                     + "Connection: Upgrade\r\n"
                     + "Sec-WebSocket-Key: " + key + "\r\n"
                     + "Sec-WebSocket-Version: 13\r\n"
-                    + "User-Agent: CFMobileOptimizer/1.25\r\n\r\n";
+                    + "User-Agent: CFMobileOptimizer/1.26\r\n\r\n";
             out.write(request.getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
@@ -1267,7 +1350,7 @@ public class MainActivity extends Activity {
         String path = target.getFile().isEmpty() ? "/" : target.getFile();
         String request = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: " + host + "\r\n"
-                + "User-Agent: CFMobileOptimizer/1.25\r\n"
+                + "User-Agent: CFMobileOptimizer/1.26\r\n"
                 + "Accept: */*\r\n"
                 + "Connection: close\r\n\r\n";
         out.write(request.getBytes(StandardCharsets.US_ASCII));
@@ -1280,7 +1363,7 @@ public class MainActivity extends Activity {
             HttpURLConnection conn = (HttpURLConnection) new URL(text).openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
-            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.25");
+            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.26");
             try (InputStream in = conn.getInputStream()) {
                 text = new String(readAll(in), StandardCharsets.UTF_8);
             }
@@ -2348,7 +2431,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setRequestProperty("Authorization", "Bearer " + textspaceToken());
         conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.25");
+        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.26");
         if (body != null) {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
