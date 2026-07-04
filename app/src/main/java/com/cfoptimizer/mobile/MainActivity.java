@@ -158,7 +158,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("CF 手机优选 v1.22");
+        title.setText("CF 手机优选 v1.23");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(TEXT);
@@ -801,13 +801,21 @@ public class MainActivity extends Activity {
             log("ProxyIP 没有可连接结果，继续使用当前 ProxyIP");
             return;
         }
-        String bestAddress = best.address();
+        String bestAddress = proxyAddressForEdgetunnel(best);
         config.proxyip = bestAddress;
         prefs.edit().putString("proxyip", bestAddress).apply();
         ui.post(() -> proxyEdit.setText(bestAddress));
-        log("已自动选用 ProxyIP 第一名：" + bestAddress
+        log("已自动选用 ProxyIP 第一名：" + best.address()
+                + (best.address().equals(bestAddress) ? "" : "，写入 " + bestAddress)
                 + " 成功" + best.successes + "/" + config.repeats
                 + " " + String.format(Locale.US, "%.2fms", best.bestMs));
+    }
+
+    private String proxyAddressForEdgetunnel(ProxyResult proxy) {
+        if (proxy.port == 443 && !proxy.host.contains(":")) {
+            return proxy.host;
+        }
+        return proxy.address();
     }
 
     private ProxyResult firstUsableProxy(List<ProxyResult> results) {
@@ -1062,7 +1070,7 @@ public class MainActivity extends Activity {
                     + "Connection: Upgrade\r\n"
                     + "Sec-WebSocket-Key: " + key + "\r\n"
                     + "Sec-WebSocket-Version: 13\r\n"
-                    + "User-Agent: CFMobileOptimizer/1.22\r\n\r\n";
+                    + "User-Agent: CFMobileOptimizer/1.23\r\n\r\n";
             out.write(request.getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
@@ -1182,7 +1190,7 @@ public class MainActivity extends Activity {
         String path = target.getFile().isEmpty() ? "/" : target.getFile();
         String request = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: " + host + "\r\n"
-                + "User-Agent: CFMobileOptimizer/1.22\r\n"
+                + "User-Agent: CFMobileOptimizer/1.23\r\n"
                 + "Accept: */*\r\n"
                 + "Connection: close\r\n\r\n";
         out.write(request.getBytes(StandardCharsets.US_ASCII));
@@ -1195,7 +1203,7 @@ public class MainActivity extends Activity {
             HttpURLConnection conn = (HttpURLConnection) new URL(text).openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
-            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.22");
+            conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.23");
             try (InputStream in = conn.getInputStream()) {
                 text = new String(readAll(in), StandardCharsets.UTF_8);
             }
@@ -1538,7 +1546,7 @@ public class MainActivity extends Activity {
         dialogRoot.setOrientation(LinearLayout.VERTICAL);
         dialogRoot.setPadding(dp(14), dp(8), dp(14), 0);
 
-        TextView tip = label("搜索 IP / 端口 / 地区 / ProxyIP，勾选坏节点后删除。删除只会先更新编辑框，保存后才同步到 TextSpace。");
+        TextView tip = label("搜索 IP / 端口 / 地区 / ProxyIP，勾选坏节点后删除，删除后会自动重新保存。");
         dialogRoot.addView(tip);
 
         EditText search = new EditText(this);
@@ -1611,9 +1619,10 @@ public class MainActivity extends Activity {
                 return;
             }
             String next = removeNodeLines(content, selectedLineIndexes);
+            int deletedCount = selectedLineIndexes.size();
             textspaceContentEdit.setText(next);
-            Toast.makeText(this, "已删除 " + selectedLineIndexes.size() + " 个节点，保存后生效", Toast.LENGTH_SHORT).show();
             dialog.dismiss();
+            saveTextspaceNote(false, "已删除 " + deletedCount + " 个节点并重新保存");
         }));
         dialog.show();
     }
@@ -1925,6 +1934,10 @@ public class MainActivity extends Activity {
     }
 
     private void saveTextspaceNote(boolean share) {
+        saveTextspaceNote(share, "");
+    }
+
+    private void saveTextspaceNote(boolean share, String successToast) {
         if (textspaceRunning) return;
         textspaceRunning = true;
         setTextspaceButtons(false);
@@ -1962,6 +1975,7 @@ public class MainActivity extends Activity {
                 String finalTitle = title;
                 String finalContent = content;
                 String finalShareUrl = shareUrl;
+                String finalSuccessToast = successToast == null ? "" : successToast;
                 ui.post(() -> {
                     textspaceTitleEdit.setText(finalTitle);
                     textspaceContentEdit.setText(finalContent);
@@ -1970,6 +1984,9 @@ public class MainActivity extends Activity {
                     selectNoteInSpinner(currentNote.id);
                     if (!finalShareUrl.isEmpty()) {
                         copyText("textspace-share-url", finalShareUrl, "分享 URL 已复制");
+                    }
+                    if (!finalSuccessToast.isEmpty()) {
+                        Toast.makeText(this, finalSuccessToast, Toast.LENGTH_SHORT).show();
                     }
                     status(share ? "已复制分享 URL：" + finalShareUrl : "已同步 TextSpace：" + finalTitle);
                 });
@@ -2057,7 +2074,7 @@ public class MainActivity extends Activity {
         conn.setRequestMethod(method);
         conn.setRequestProperty("Authorization", "Bearer " + textspaceToken());
         conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.22");
+        conn.setRequestProperty("User-Agent", "CFMobileOptimizer/1.23");
         if (body != null) {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
